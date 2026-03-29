@@ -11,6 +11,8 @@ TE_PREMIUM = True
 FANTASYCALC_URL = "https://api.fantasycalc.com/values/current"
 KTC_DYNASTY_URL = "https://keeptradecut.com/dynasty-rankings"
 KTC_ROOKIE_URL = "https://keeptradecut.com/dynasty-rankings/rookie-rankings"
+SLEEPER_API = "https://api.sleeper.app/v1"
+CURRENT_SEASON = 2025
 
 # Data paths
 DATA_DIR = Path(__file__).parent / "data"

@@ -43,6 +43,18 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
             )
             df = df[(df[col] >= tier_range[0]) & (df[col] <= tier_range[1])]
 
+    # Owner filter (when league connected)
+    if "owner" in df.columns:
+        # "My team only" shortcut
+        my_name = st.session_state.get("sleeper_display_name")
+        if my_name and st.sidebar.checkbox("My team only"):
+            df = df[df["owner"] == my_name]
+        else:
+            owners = sorted(df["owner"].dropna().unique())
+            selected_owners = st.sidebar.multiselect("Owner", owners)
+            if selected_owners:
+                df = df[df["owner"].isin(selected_owners)]
+
     # Team filter
     teams = sorted(df["team"].dropna().unique())
     selected_teams = st.sidebar.multiselect("Team", teams)

@@ -124,6 +124,10 @@ def merge_rankings(fc_df: pd.DataFrame, ktc_df: pd.DataFrame) -> pd.DataFrame:
             result[col + "_norm"] = 50.0
     result["value_diff_norm"] = result["fc_value_norm"] - result["ktc_value_norm"]
 
+    # Blended rank: average of FC and KTC rank (use whichever is available)
+    result["blended_rank"] = result[["fc_rank", "ktc_rank"]].mean(axis=1)
+    result["blended_value"] = result[["fc_value_norm", "ktc_value_norm"]].mean(axis=1)
+
     result = result.sort_values("rank_diff_weighted_abs", ascending=False, na_position="last")
     result = result.reset_index(drop=True)
     return result

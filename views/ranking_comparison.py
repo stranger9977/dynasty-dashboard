@@ -15,6 +15,12 @@ def render():
         return
 
     df = pd.read_parquet(MERGED_PARQUET)
+
+    # Annotate with ownership if league connected
+    if "ownership_map" in st.session_state:
+        from ingestion.ownership import annotate_ownership
+        df = annotate_ownership(df, st.session_state["ownership_map"])
+
     filtered = apply_filters(df)
 
     if filtered.empty:
@@ -93,7 +99,8 @@ def render():
                 range=["#e41a1c", "#377eb8", "#4daf4a", "#ff7f00"],
             )),
             tooltip=["name", "position", "team", "fc_rank:Q", "ktc_rank:Q",
-                      "rank_diff:Q", "rank_diff_weighted:Q"],
+                      "rank_diff:Q", "rank_diff_weighted:Q"]
+                     + (["owner"] if "owner" in matched.columns else []),
         )
 
         line = alt.Chart(diagonal).mark_line(
@@ -106,7 +113,7 @@ def render():
     tabs = st.tabs(["All"] + ["QB", "RB", "WR", "TE"])
 
     display_cols = [
-        "name", "position", "team", "fc_rank", "ktc_rank", "rank_diff",
+        "name", "owner", "position", "team", "fc_rank", "ktc_rank", "rank_diff",
         "rank_diff_weighted",
         "fc_pos_rank", "ktc_pos_rank", "pos_rank_diff",
         "fc_value", "ktc_value", "fc_tier", "ktc_tier",
@@ -124,6 +131,7 @@ def render():
                 hide_index=True,
                 column_config={
                     "name": st.column_config.TextColumn("Player", width="medium"),
+                    "owner": st.column_config.TextColumn("Owner", width="medium"),
                     "position": st.column_config.TextColumn("Pos", width="small"),
                     "team": st.column_config.TextColumn("Team", width="small"),
                     "fc_rank": st.column_config.NumberColumn("FC#", format="%d"),
