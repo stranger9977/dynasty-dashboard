@@ -16,7 +16,7 @@ HEADERS = {
 }
 
 
-def _extract_players_array(html: str) -> list[dict]:
+def extract_players_array(html: str) -> list[dict]:
     match = re.search(r"var\s+playersArray\s*=\s*(\[.*?\]);", html, re.DOTALL)
     if not match:
         raise ValueError("Could not find playersArray in KTC page HTML")
@@ -26,7 +26,7 @@ def _extract_players_array(html: str) -> list[dict]:
 def fetch_ktc() -> pd.DataFrame:
     resp = requests.get(KTC_DYNASTY_URL, headers=HEADERS, timeout=30)
     resp.raise_for_status()
-    players = _extract_players_array(resp.text)
+    players = extract_players_array(resp.text)
 
     rows = []
     for p in players:

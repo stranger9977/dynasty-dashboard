@@ -9,20 +9,44 @@ from config import DATA_DIR, FC_PARQUET, KTC_PARQUET, MERGED_PARQUET
 def render_sidebar() -> str:
     st.sidebar.title("Dynasty Dashboard")
 
-    # League info
+    # League switcher
     if "league_id" in st.session_state:
-        st.sidebar.caption(
-            f"**{st.session_state['league_name']}**  \n"
-            f"_{st.session_state['sleeper_display_name']}_"
+        from ingestion.sleeper import get_leagues, build_ownership_map
+
+        st.sidebar.caption(f"_{st.session_state['sleeper_display_name']}_")
+
+        # League selector — switch without disconnecting
+        leagues = get_leagues(st.session_state["user_id"])
+        league_map = {lg["name"]: lg for lg in leagues}
+        current_name = st.session_state.get("league_name")
+
+        # Find index of current league
+        league_names = list(league_map.keys())
+        current_idx = league_names.index(current_name) if current_name in league_names else 0
+
+        selected_name = st.sidebar.selectbox(
+            "League", league_names, index=current_idx, key="league_selector"
         )
-        if st.sidebar.button("Disconnect League", use_container_width=True):
+
+        # Switch league if changed
+        if selected_name != current_name:
+            selected_league = league_map[selected_name]
+            st.session_state["league_id"] = selected_league["league_id"]
+            st.session_state["league_name"] = selected_league["name"]
+            st.session_state["ownership_map"] = build_ownership_map(
+                selected_league["league_id"]
+            )
+            st.rerun()
+
+        if st.sidebar.button("Disconnect", use_container_width=True):
             for key in ["sleeper_username", "sleeper_display_name", "user_id",
-                        "league_id", "league_name", "ownership_map"]:
+                        "league_id", "league_name", "ownership_map", "leagues"]:
                 st.session_state.pop(key, None)
             st.rerun()
+
         st.sidebar.markdown("---")
 
-    tool = st.sidebar.radio("Tool", ["Ranking Comparison", "Waiver Wire"], label_visibility="collapsed")
+    tool = st.sidebar.radio("Tool", ["Ranking Comparison", "Waiver Wire", "Draft Wizard", "Trade History"], label_visibility="collapsed", key="selected_tool")
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Data")

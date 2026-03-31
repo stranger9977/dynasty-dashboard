@@ -16,3 +16,9 @@ else:
     elif selected_tool == "Waiver Wire":
         from views.waiver_wire import render
         render()
+    elif selected_tool == "Draft Wizard":
+        from views.draft_wizard import render
+        render()
+    elif selected_tool == "Trade History":
+        from views.trade_history import render
+        render()

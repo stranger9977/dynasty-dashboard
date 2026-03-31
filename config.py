@@ -12,13 +12,19 @@ FANTASYCALC_URL = "https://api.fantasycalc.com/values/current"
 KTC_DYNASTY_URL = "https://keeptradecut.com/dynasty-rankings"
 KTC_ROOKIE_URL = "https://keeptradecut.com/dynasty-rankings/rookie-rankings"
 SLEEPER_API = "https://api.sleeper.app/v1"
-CURRENT_SEASON = 2025
+from datetime import date
+CURRENT_SEASON = date.today().year
 
 # Data paths
 DATA_DIR = Path(__file__).parent / "data"
 FC_PARQUET = DATA_DIR / "fantasycalc.parquet"
 KTC_PARQUET = DATA_DIR / "ktc.parquet"
 MERGED_PARQUET = DATA_DIR / "merged.parquet"
+
+# KTC history cache
+KTC_HISTORY_DIR = DATA_DIR / "ktc_history"
+KTC_HISTORY_TTL_DAYS = 7
+KTC_PLAYER_URL = "https://keeptradecut.com/dynasty-rankings/players"
 
 # Position groups
 POSITIONS = ["QB", "RB", "WR", "TE"]

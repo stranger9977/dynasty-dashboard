@@ -4,6 +4,12 @@ import streamlit as st
 
 from config import MERGED_PARQUET, POSITIONS
 
+RANK_SOURCES = {
+    "Blended (avg)": ("blended_rank", "Rank"),
+    "FantasyCalc": ("fc_rank", "FC#"),
+    "KeepTradeCut": ("ktc_rank", "KTC#"),
+}
+
 
 def render():
     st.header("Waiver Wire")
@@ -23,12 +29,18 @@ def render():
     from ingestion.ownership import annotate_ownership
     df = annotate_ownership(df, st.session_state["ownership_map"])
 
+    # --- Ranking source toggle ---
+    source_label = st.radio(
+        "Rank by", list(RANK_SOURCES.keys()), horizontal=True, key="ww_source"
+    )
+    rank_col, rank_display = RANK_SOURCES[source_label]
+
     # Waiver wire = Free Agents only (not incoming rookies, not rostered)
     fa = df[df["owner"] == "Free Agent"].copy()
 
-    # Require at least one source ranking
-    fa = fa[fa["fc_rank"].notna() | fa["ktc_rank"].notna()]
-    fa = fa.sort_values("blended_rank", na_position="last").reset_index(drop=True)
+    # Require the selected ranking source to be present
+    fa = fa[fa[rank_col].notna()]
+    fa = fa.sort_values(rank_col, na_position="last").reset_index(drop=True)
 
     # --- Summary ---
     col1, col2, col3, col4 = st.columns(4)
@@ -43,12 +55,6 @@ def render():
     positions = st.sidebar.multiselect("Position", POSITIONS, default=POSITIONS, key="ww_pos")
     fa = fa[fa["position"].isin(positions)]
 
-    max_rank = st.sidebar.slider(
-        "Max blended rank", 50, int(fa["blended_rank"].max()) if len(fa) > 0 else 500, 200,
-        key="ww_max_rank",
-    )
-    fa = fa[fa["blended_rank"] <= max_rank]
-
     search = st.sidebar.text_input("Search player", key="ww_search")
     if search:
         fa = fa[fa["name"].str.contains(search, case=False, na=False)]
@@ -61,10 +67,12 @@ def render():
     tabs = st.tabs(["All"] + POSITIONS)
 
     display_cols = [
-        "name", "position", "team", "blended_rank",
+        "name", "position", "team", rank_col,
         "fc_rank", "ktc_rank", "fc_value", "ktc_value",
         "fc_tier", "ktc_tier", "age", "years_exp",
     ]
+    # Deduplicate if rank_col is already fc_rank or ktc_rank
+    display_cols = list(dict.fromkeys(display_cols))
     available_cols = [c for c in display_cols if c in fa.columns]
 
     col_config = {
@@ -85,7 +93,7 @@ def render():
     for tab, pos_filter in zip(tabs, [None] + POSITIONS):
         with tab:
             tab_df = fa if pos_filter is None else fa[fa["position"] == pos_filter]
-            tab_df = tab_df.sort_values("blended_rank")
+            tab_df = tab_df.sort_values(rank_col)
             st.dataframe(
                 tab_df[available_cols],
                 use_container_width=True,
@@ -97,21 +105,21 @@ def render():
     my_name = st.session_state.get("sleeper_display_name")
     if my_name:
         my_team = df[df["owner"] == my_name].copy()
-        my_team = my_team[my_team["blended_rank"].notna()]
+        my_team = my_team[my_team[rank_col].notna()]
 
         if not my_team.empty:
             st.subheader("Upgrade Opportunities")
-            st.caption(f"Free agents ranked higher than your worst player at each position")
+            st.caption(f"Free agents ranked higher than your worst player at each position (by {source_label})")
 
             for pos in positions:
-                my_pos = my_team[my_team["position"] == pos].sort_values("blended_rank")
-                fa_pos = fa[fa["position"] == pos].sort_values("blended_rank")
+                my_pos = my_team[my_team["position"] == pos].sort_values(rank_col)
+                fa_pos = fa[fa["position"] == pos].sort_values(rank_col)
 
                 if my_pos.empty or fa_pos.empty:
                     continue
 
-                worst_rank = my_pos["blended_rank"].max()
-                upgrades = fa_pos[fa_pos["blended_rank"] < worst_rank]
+                worst_rank = my_pos[rank_col].max()
+                upgrades = fa_pos[fa_pos[rank_col] < worst_rank]
 
                 if upgrades.empty:
                     continue
@@ -120,8 +128,9 @@ def render():
                     f"**{pos}** — {len(upgrades)} available ranked above your {pos}{len(my_pos)}",
                     expanded=True,
                 ):
-                    compare_cols = ["name", "team", "blended_rank", "fc_rank", "ktc_rank",
+                    compare_cols = ["name", "team", rank_col, "fc_rank", "ktc_rank",
                                     "fc_value", "ktc_value", "age"]
+                    compare_cols = list(dict.fromkeys(compare_cols))
                     avail_compare = [c for c in compare_cols if c in fa.columns]
 
                     col_left, col_right = st.columns(2)
@@ -135,7 +144,7 @@ def render():
                     with col_right:
                         st.markdown("**Your Worst Rostered**")
                         st.dataframe(
-                            my_pos[avail_compare].tail(5).sort_values("blended_rank", ascending=False),
+                            my_pos[avail_compare].tail(5).sort_values(rank_col, ascending=False),
                             use_container_width=True, hide_index=True,
                             column_config=col_config,
                         )
@@ -152,13 +161,13 @@ def render():
     if chart_data:
         chart_df = pd.concat(chart_data)
         chart = alt.Chart(chart_df).mark_bar().encode(
-            x=alt.X("blended_rank:Q", title="Blended Rank", scale=alt.Scale(reverse=True)),
-            y=alt.Y("name:N", sort=alt.EncodingSortField(field="blended_rank", order="ascending"), title=""),
+            x=alt.X(f"{rank_col}:Q", title=rank_display, scale=alt.Scale(reverse=True)),
+            y=alt.Y("name:N", sort=alt.EncodingSortField(field=rank_col, order="ascending"), title=""),
             color=alt.Color("position:N", scale=alt.Scale(
                 domain=["QB", "RB", "WR", "TE"],
                 range=["#e41a1c", "#377eb8", "#4daf4a", "#ff7f00"],
             )),
-            tooltip=["name", "position", "team", "blended_rank:Q", "fc_rank:Q", "ktc_rank:Q", "age:Q"],
+            tooltip=["name", "position", "team", f"{rank_col}:Q", "fc_rank:Q", "ktc_rank:Q", "age:Q"],
             row=alt.Row("position:N", title="", sort=POSITIONS),
         ).properties(height=alt.Step(20)).resolve_scale(y="independent")
 
