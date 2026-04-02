@@ -77,6 +77,12 @@ draft_with_snap_window <- draft |>
 offensive_groups <- c("QB", "RB", "WR", "TE", "OT", "IOL")
 defensive_groups <- c("EDGE", "DL", "LB", "CB", "S")
 
+# Count total regular-season games per season for denominator
+games_per_season <- snaps_raw |>
+  filter(game_type == "REG" | is.na(game_type)) |>
+  group_by(season) |>
+  summarise(max_games = max(week, na.rm = TRUE), .groups = "drop")
+
 snaps_agg <- snaps_raw |>
   select(season, week, pfr_player_id, offense_pct, defense_pct) |>
   inner_join(
@@ -89,11 +95,26 @@ snaps_agg <- snaps_raw |>
   ) |>
   group_by(pfr_player_id) |>
   summarise(
-    avg_snap_pct = mean(snap_pct, na.rm = TRUE),
-    total_games_snapped = n(),
+    games_played = n(),
     seasons_with_snaps = n_distinct(season),
+    sum_snap_pct = sum(snap_pct, na.rm = TRUE),
     .groups = "drop"
-  )
+  ) |>
+  # Join back to get the 4-season window and compute expected games
+  inner_join(
+    draft_with_snap_window |> select(pfr_player_id, snap_start, snap_end),
+    by = "pfr_player_id"
+  ) |>
+  # Total expected games across the 4-season window
+  mutate(
+    expected_games = map2_dbl(snap_start, snap_end, function(s, e) {
+      gs <- games_per_season |> filter(season >= s, season <= e)
+      sum(gs$max_games)
+    }),
+    # Average snap % denominated by ALL expected games, not just games played
+    avg_snap_pct = sum_snap_pct / expected_games
+  ) |>
+  select(pfr_player_id, avg_snap_pct, games_played, seasons_with_snaps)
 
 cat(sprintf("  Aggregated snap data for %d players\n", nrow(snaps_agg)))
 
