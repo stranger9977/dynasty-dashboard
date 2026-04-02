@@ -167,11 +167,12 @@ second_contracts <- draft_snaps |>
   ) |>
   filter(
     str_to_lower(str_trim(pfr_player_name)) == str_to_lower(str_trim(player)),
-    year_signed >= season + ROOKIE_DEAL_YEARS,
-    year_signed <= season + ROOKIE_DEAL_YEARS + 2
+    year_signed >= season + 2,                        # exclude rookie deal (signed draft year)
+    year_signed <= season + ROOKIE_DEAL_YEARS + 2     # up to 2 years after rookie deal expires
   ) |>
+  # Take the highest-value contract in the window (captures extensions over vet-min deals)
   group_by(pfr_player_id) |>
-  slice_min(year_signed, n = 1, with_ties = FALSE) |>
+  slice_max(apy_cap_pct, n = 1, with_ties = FALSE) |>
   ungroup() |>
   select(pfr_player_id, second_apy_cap_pct = apy_cap_pct,
          second_contract_year = year_signed, second_contract_apy = apy,
@@ -220,26 +221,35 @@ cat(sprintf("  Final dataset: %d players\n", nrow(analysis_df)))
 
 cat("Computing Sharpe ratios...\n")
 
+# Compute snap-weighted return for each player (used for elite threshold)
+analysis_df <- analysis_df |>
+  mutate(
+    snap_ratio = avg_snap_pct / hit_threshold,
+    player_return = snap_ratio * second_apy_cap_pct
+  )
+
 elite_threshold <- quantile(
-  analysis_df$second_apy_cap_pct[analysis_df$second_apy_cap_pct > 0],
+  analysis_df$player_return[analysis_df$player_return > 0],
   probs = 0.90, na.rm = TRUE
 )
-cat(sprintf("  Elite threshold (90th pctl of non-zero): %.4f apy_cap_pct\n", elite_threshold))
+cat(sprintf("  Elite threshold (90th pctl of snap-weighted return): %.4f\n", elite_threshold))
 
 sharpe_ratios <- analysis_df |>
   group_by(pos_group, tier) |>
   summarise(
     n = n(),
     hit_rate = mean(is_hit),
+    mean_player_return = mean(player_return, na.rm = TRUE),
     mean_second_contract = mean(second_apy_cap_pct, na.rm = TRUE),
+    sd_player_return = sd(player_return, na.rm = TRUE),
     sd_second_contract = sd(second_apy_cap_pct, na.rm = TRUE),
-    elite_prob = mean(second_apy_cap_pct >= elite_threshold, na.rm = TRUE),
+    elite_prob = mean(player_return >= elite_threshold, na.rm = TRUE),
     fa_replacement = first(fa_median_apy_cap_pct),
     .groups = "drop"
   ) |>
   mutate(
     sharpe_linear = (mean_second_contract - fa_replacement) / sd_second_contract,
-    sharpe_elite = (elite_prob * elite_threshold - fa_replacement) / sd_second_contract
+    sharpe_elite = (elite_prob * elite_threshold - fa_replacement) / sd_player_return
   ) |>
   mutate(
     across(starts_with("sharpe_"), ~ if_else(is.finite(.x), .x, NA_real_))
@@ -266,14 +276,32 @@ write_csv(hit_rates_export, "output/hit_rates.csv")
 
 write_csv(fa_replacement, "output/fa_replacement.csv")
 
+# --- 10. Player-Level Sharpe --------------------------------------------------
+
+cat("Computing player-level Sharpe ratios...\n")
+
+# Player Sharpe = (player_return - FA replacement) / bucket volatility
+# player_return = (snap_pct / positional_baseline) * second_contract_cap_pct
+# This rewards both playing time (Riske) and contract quality (Brill)
+
 player_lookup <- analysis_df |>
-  select(pfr_player_name, pos_group, season, pick, tier,
-         is_hit, avg_snap_pct, second_apy_cap_pct) |>
   left_join(
-    sharpe_ratios |> select(pos_group, tier, sharpe_linear, sharpe_elite),
+    sharpe_ratios |> select(pos_group, tier, sd_player_return, sd_second_contract, sharpe_linear, sharpe_elite),
     by = c("pos_group", "tier")
   ) |>
-  arrange(desc(season), pick)
+  mutate(
+    # snap_ratio and player_return already computed in section 8
+    player_sharpe = (player_return - fa_median_apy_cap_pct) / sd_player_return,
+    player_sharpe = if_else(is.finite(player_sharpe), player_sharpe, NA_real_)
+  ) |>
+  select(pfr_player_name, pos_group, team, gsis_id, season, pick, tier,
+         is_hit, avg_snap_pct, snap_ratio, second_apy_cap_pct,
+         player_return, player_sharpe, sharpe_linear, sharpe_elite) |>
+  arrange(desc(player_sharpe))
+
+cat(sprintf("  Top 5 player Sharpe ratios:\n"))
+player_lookup |> head(5) |> select(pfr_player_name, pos_group, pick, player_sharpe) |> print()
+
 write_csv(player_lookup, "output/player_lookup.csv")
 
 cat("Done! Outputs:\n")

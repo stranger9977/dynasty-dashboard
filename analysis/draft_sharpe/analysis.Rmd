@@ -4,6 +4,7 @@ subtitle: "How much is a draft pick really worth, by position?"
 output:
   github_document:
     html_preview: false
+knit: (function(input, ...) rmarkdown::render(input, output_dir = dirname(input), ...))
 ---
 
 ```{r setup, include=FALSE}
@@ -14,9 +15,11 @@ knitr::opts_chunk$set(
 )
 library(tidyverse)
 library(arrow)
-library(gt)
 library(scales)
 library(ggridges)
+library(gt)
+library(nflplotR)
+library(nflreadr)
 
 pos_colors <- c(
   "QB" = "#E41A1C", "RB" = "#377EB8", "WR" = "#4DAF4A", "TE" = "#984EA3",
@@ -36,38 +39,77 @@ player_lookup <- read_csv("output/player_lookup.csv", show_col_types = FALSE)
 sharpe <- sharpe %>% mutate(tier = factor(tier, levels = tier_order))
 df <- df %>% mutate(tier = factor(tier, levels = tier_order))
 player_lookup <- player_lookup %>% mutate(tier = factor(tier, levels = tier_order))
+
+# Load headshots and most recent team for gt tables
+rosters <- load_rosters(seasons = 2012:2025)
+
+headshots <- rosters %>%
+  select(gsis_id, headshot_url) %>%
+  distinct(gsis_id, .keep_all = TRUE)
+
+recent_teams <- rosters %>%
+  filter(!is.na(gsis_id), gsis_id != "") %>%
+  group_by(gsis_id) %>%
+  slice_max(season, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(gsis_id, recent_team = team)
+
+player_lookup <- player_lookup %>%
+  left_join(headshots, by = "gsis_id") %>%
+  left_join(recent_teams, by = "gsis_id") %>%
+  mutate(team = coalesce(recent_team, team)) %>%
+  select(-recent_team)
 ```
 
 ## The Setup
 
-Traditional draft pick valuation treats picks as interchangeable assets -- a "top 10 pick" has
-one value regardless of whether you're drafting a quarterback or a safety. But the return on
-investment varies enormously by position. A quasi-Sharpe ratio lets us quantify this.
+Traditional draft pick valuation treats picks as interchangeable assets — a "top 10 pick" has
+one value regardless of whether you're drafting a quarterback or a running back. But the return
+on investment varies enormously by position. A quasi-Sharpe ratio lets us quantify this.
+
+This analysis combines two frameworks:
+
+1. **Hit Rate ([Riske/PFF](https://www.pff.com/news/draft-pff-data-study-what-makes-an-nfl-draft-pick-a-hit)):**
+   A player is a "hit" if their average snap percentage over their first 4 NFL seasons reaches at
+   least 2/3 of the positional baseline for a full-time starter. Snap % is averaged over ALL
+   expected games (including seasons not played as zero), so players who wash out are properly
+   penalized.
+
+2. **Nonlinear Upside ([Brill & Wyner 2024](https://arxiv.org/abs/2407.00730)):** Not all hits are
+   equal. Variance decays convexly across the draft, meaning earlier picks have fatter right tails.
+   We capture this with a **snap-weighted return** — snap ratio (playing time relative to positional
+   baseline) times second-contract value (APY as % of salary cap). This rewards players who both
+   dominated snaps AND earned elite second contracts, while filtering out players who got paid but
+   didn't play.
+
+3. **Salary data** from [OverTheCap](https://overthecap.com/contracts) via
+   [nflreadr](https://nflreadr.nflverse.com/). Contract values normalized to % of salary cap to
+   control for cap inflation across eras.
 
 **The formula:**
 
-**Sharpe (linear) = (Mean 2nd Contract Value - FA Replacement Cost) / Std Dev of 2nd Contract Value**
+**Sharpe = (P(elite snap-weighted return) x Elite Threshold - FA Replacement Cost) / Return Volatility**
 
 | Component | What it measures |
 |---|---|
-| Mean second-contract value (% of cap) | The average return on a drafted player at that position and tier |
-| FA replacement cost (median cap %) | What you'd pay on the open market for a replacement-level player |
-| Standard deviation of second-contract value | The variance (risk) in outcomes |
+| **Return** | Probability of a top-10% snap-weighted return (snap ratio x contract cap%) at that position x tier |
+| **Risk-free rate** | Median starter-caliber FA contract for that position ([top 32 per year](https://overthecap.com/contracts)) |
+| **Volatility** | Std dev of snap-weighted returns, including busts at $0 |
 
-A **hit** is defined as a player whose average snap percentage exceeds the position-specific
-threshold (derived from the median snap % of all players at that position who played 3+ seasons).
+A high ratio = reliable surplus above free agency. A low or negative ratio = you're better off
+buying the position in free agency and using the draft capital elsewhere.
 
-The key insight is **nonlinearity**: the distribution of second-contract values is heavily
-right-skewed. A few elite players earn massive contracts while most earn close to replacement
-cost. This means the linear Sharpe ratio understates the value of positions where elite outcomes
-are disproportionately valuable. The elite-weighted variant accounts for this:
-
-**Sharpe (elite) = (P(elite outcome) x Elite Threshold - FA Replacement Cost) / Std Dev of 2nd Contract Value**
-
-where "elite" is defined as a second-contract value in the 90th percentile.
+**Data sources:** Draft picks, snap counts, and contracts all via
+[nflreadr](https://nflreadr.nflverse.com/) (PFR + OverTheCap). Analysis covers all drafted
+players from 2009 onward where snap count data is available.
 
 ```{r elite-threshold}
-elite_threshold <- quantile(df$second_apy_cap_pct[df$second_apy_cap_pct > 0], 0.90)
+# Elite threshold uses snap-weighted return (snap_ratio × contract)
+df <- df %>% mutate(
+  snap_ratio = avg_snap_pct / hit_threshold,
+  player_return = snap_ratio * second_apy_cap_pct
+)
+elite_threshold <- quantile(df$player_return[df$player_return > 0], 0.90)
 ```
 
 ## Hit Rates by Position and Tier
@@ -105,21 +147,22 @@ hit_rates %>%
   mutate(hit_rate = percent(hit_rate, accuracy = 0.1)) %>%
   select(-n) %>%
   pivot_wider(names_from = tier, values_from = hit_rate) %>%
-  gt() %>%
-  tab_header(title = "Hit Rates by Position Group and Draft Tier") %>%
-  cols_label(pos_group = "Position")
+  rename(Position = pos_group) %>%
+  knitr::kable()
 ```
 
 ## The Nonlinearity Story
 
 Second-contract values are not normally distributed. The ridgeline plot below shows how
-outcomes cluster near zero for most players, with long right tails for positions like QB and EDGE.
+snap-weighted returns (snap ratio x contract value) cluster near zero for most players, with
+long right tails for positions like QB and EDGE. By weighting by snap ratio, players who
+earned big contracts but barely played are discounted.
 
 ```{r ridgeline-plot, fig.height=8}
 df_contracts <- df %>%
-  filter(second_apy_cap_pct > 0)
+  filter(player_return > 0)
 
-ggplot(df_contracts, aes(x = second_apy_cap_pct, y = reorder(pos_group, second_apy_cap_pct, FUN = median), fill = pos_group)) +
+ggplot(df_contracts, aes(x = player_return, y = reorder(pos_group, player_return, FUN = median), fill = pos_group)) +
   geom_density_ridges(alpha = 0.7, scale = 1.5, rel_min_height = 0.01) +
   geom_vline(xintercept = elite_threshold, linetype = "dashed", color = "red", linewidth = 0.7) +
   annotate("text", x = elite_threshold + 0.005, y = 1, label = paste0("Elite threshold: ", percent(elite_threshold, accuracy = 0.1)),
@@ -127,9 +170,9 @@ ggplot(df_contracts, aes(x = second_apy_cap_pct, y = reorder(pos_group, second_a
   scale_fill_manual(values = pos_colors) +
   scale_x_continuous(labels = percent_format()) +
   labs(
-    title = "Distribution of Second-Contract Values by Position",
-    subtitle = "Only players who received a second contract | Dashed line = 90th percentile (elite)",
-    x = "Second Contract APY (% of Salary Cap)", y = NULL
+    title = "Distribution of Snap-Weighted Returns by Position",
+    subtitle = "Snap Ratio x Second Contract Cap% | Dashed line = 90th percentile (elite)",
+    x = "Snap-Weighted Return (Snap Ratio x APY Cap%)", y = NULL
   ) +
   theme_minimal(base_size = 14) +
   theme(legend.position = "none")
@@ -138,27 +181,52 @@ ggplot(df_contracts, aes(x = second_apy_cap_pct, y = reorder(pos_group, second_a
 ```{r elite-probability, fig.height=6}
 key_positions <- c("QB", "RB", "WR", "TE", "EDGE", "OT")
 
-elite_by_tier <- sharpe %>%
+# Compute Wilson binomial confidence intervals for elite probability
+# Elite = top 10% of snap-weighted return (snap_ratio × contract)
+elite_by_tier <- df %>%
+  group_by(pos_group, tier) %>%
+  summarise(
+    n = n(),
+    successes = sum(player_return >= elite_threshold),
+    elite_prob = successes / n,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Wilson score interval
+    z = 1.96,
+    denom = 1 + z^2 / n,
+    center = (elite_prob + z^2 / (2 * n)) / denom,
+    margin = z * sqrt((elite_prob * (1 - elite_prob) + z^2 / (4 * n)) / n) / denom,
+    ci_lo = pmax(center - margin, 0),
+    ci_hi = pmin(center + margin, 1)
+  ) %>%
   filter(pos_group %in% key_positions)
 
-ggplot(elite_by_tier, aes(x = tier, y = elite_prob, color = pos_group, group = pos_group)) +
+ggplot(elite_by_tier, aes(x = tier, y = elite_prob, color = pos_group, fill = pos_group, group = pos_group)) +
+  geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.12, color = NA) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
   scale_color_manual(values = pos_colors) +
+  scale_fill_manual(values = pos_colors) +
   scale_y_continuous(labels = percent_format()) +
   labs(
-    title = "Probability of an Elite Second Contract by Position and Tier",
-    subtitle = "Elite = second-contract APY in the 90th percentile | Key positions only",
+    title = "Probability of an Elite Snap-Weighted Return by Position and Tier",
+    subtitle = "Elite = top 10% of Snap Ratio x Contract Cap% | Bands = 95% Wilson CI",
     x = NULL, y = "P(Elite)", color = "Position"
   ) +
+  guides(fill = "none") +
   theme_minimal(base_size = 14) +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 ```
 
 ## Free Agency Replacement Cost
 
-The denominator concept: what does it cost to replace a player at each position via free agency?
-This baseline is subtracted from draft pick returns to isolate the excess value of drafting.
+The "risk-free rate" in our Sharpe ratio. Instead of drafting a player, a team could sign a
+starter-caliber free agent. To measure this, we take the **top 32 contracts per position per
+year** (one starter per team) and compute the median APY as a percentage of the salary cap.
+This filters out vet-minimum and practice squad deals that would artificially deflate the
+replacement cost. The result is what a team actually pays to acquire a real starter on the
+open market — the true opportunity cost of using a draft pick instead.
 
 ```{r fa-replacement-bar, fig.height=6}
 ggplot(fa_replacement, aes(x = reorder(pos_group, fa_median_apy_cap_pct), y = fa_median_apy_cap_pct, fill = pos_group)) +
@@ -183,9 +251,9 @@ The money shot. This heatmap shows the quasi-Sharpe ratio for every position-tie
 Higher values mean better risk-adjusted returns relative to free agency replacement cost.
 
 ```{r sharpe-heatmap, fig.height=8}
-ggplot(sharpe, aes(x = tier, y = reorder(pos_group, sharpe_linear), fill = sharpe_linear)) +
+ggplot(sharpe, aes(x = tier, y = reorder(pos_group, sharpe_elite), fill = sharpe_elite)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = round(sharpe_linear, 2)),
+  geom_text(aes(label = round(sharpe_elite, 2)),
             size = 3.5, color = "white", fontface = "bold") +
   scale_fill_gradient2(
     low = "#c62828", mid = "#f9a825", high = "#2e7d32",
@@ -193,7 +261,7 @@ ggplot(sharpe, aes(x = tier, y = reorder(pos_group, sharpe_linear), fill = sharp
   ) +
   labs(
     title = "Quasi-Sharpe Ratio by Position Group and Draft Tier",
-    subtitle = "Higher = better risk-adjusted return over FA replacement",
+    subtitle = "Snap-weighted return vs FA replacement cost | Higher = better risk-adjusted return",
     x = NULL, y = NULL, fill = "Sharpe\nRatio"
   ) +
   theme_minimal(base_size = 14) +
@@ -205,29 +273,21 @@ ggplot(sharpe, aes(x = tier, y = reorder(pos_group, sharpe_linear), fill = sharp
 
 ```{r sharpe-table}
 sharpe %>%
-  select(pos_group, tier, n, hit_rate, mean_second_contract, fa_replacement, sharpe_linear, sharpe_elite) %>%
+  select(pos_group, tier, n, hit_rate, elite_prob, mean_player_return, fa_replacement, sharpe_elite) %>%
   mutate(
     hit_rate = percent(hit_rate, accuracy = 0.1),
-    mean_second_contract = percent(mean_second_contract, accuracy = 0.01),
+    elite_prob = percent(elite_prob, accuracy = 0.1),
+    mean_player_return = round(mean_player_return, 4),
     fa_replacement = percent(fa_replacement, accuracy = 0.01),
-    sharpe_linear = round(sharpe_linear, 3),
     sharpe_elite = round(sharpe_elite, 3)
   ) %>%
-  gt() %>%
-  tab_header(
-    title = "Full Sharpe Ratio Breakdown",
-    subtitle = "By position group and draft tier"
+  rename(
+    Position = pos_group, Tier = tier, N = n, `Hit Rate` = hit_rate,
+    `P(Elite)` = elite_prob, `Mean Snap-Wtd Return` = mean_player_return,
+    `FA Replacement` = fa_replacement,
+    `Sharpe Ratio` = sharpe_elite
   ) %>%
-  cols_label(
-    pos_group = "Position",
-    tier = "Tier",
-    n = "N",
-    hit_rate = "Hit Rate",
-    mean_second_contract = "Mean 2nd Contract",
-    fa_replacement = "FA Replacement",
-    sharpe_linear = "Sharpe (Linear)",
-    sharpe_elite = "Sharpe (Elite)"
-  )
+  knitr::kable()
 ```
 
 ## Sharpe Ratio Curves
@@ -236,86 +296,174 @@ How does the Sharpe ratio decay as you move to later draft tiers? Some positions
 deep into Day 2 and 3, while others collapse quickly.
 
 ```{r sharpe-curves, fig.height=7}
-sharpe_key <- sharpe %>%
-  filter(pos_group %in% key_positions)
+# Bootstrap 95% CI for Sharpe ratio by position x tier
+set.seed(42)
+n_boot <- 1000
 
-ggplot(sharpe_key, aes(x = tier, y = sharpe_linear, color = pos_group, group = pos_group)) +
+sharpe_boot <- df %>%
+  filter(pos_group %in% key_positions) %>%
+  group_by(pos_group, tier) %>%
+  summarise(
+    data = list(player_return),
+    fa = first(fa_median_apy_cap_pct),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    boot = map2(data, fa, function(d, fa_val) {
+      replicate(n_boot, {
+        s <- sample(d, length(d), replace = TRUE)
+        ep <- mean(s >= elite_threshold, na.rm = TRUE)
+        (ep * elite_threshold - fa_val) / sd(s)
+      })
+    }),
+    sharpe = map_dbl(boot, ~ mean(.x[is.finite(.x)], na.rm = TRUE)),
+    ci_lo = map_dbl(boot, ~ quantile(.x[is.finite(.x)], 0.025, na.rm = TRUE)),
+    ci_hi = map_dbl(boot, ~ quantile(.x[is.finite(.x)], 0.975, na.rm = TRUE))
+  )
+
+sharpe_boot <- sharpe_boot %>%
+  mutate(
+    ci_lo = pmax(ci_lo, -3),
+    ci_hi = pmin(ci_hi, 3)
+  )
+
+ggplot(sharpe_boot, aes(x = tier, y = sharpe, color = pos_group, fill = pos_group, group = pos_group)) +
+  geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.12, color = NA) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.6) +
   scale_color_manual(values = pos_colors) +
+  scale_fill_manual(values = pos_colors) +
+  coord_cartesian(ylim = c(-2.5, 1.5)) +
   labs(
     title = "Sharpe Ratio by Draft Tier",
-    subtitle = "Key positions | Dashed line = break-even vs. free agency",
-    x = NULL, y = "Quasi-Sharpe Ratio (Linear)", color = "Position"
+    subtitle = "Snap-weighted | Bands = 95% bootstrap CI | Dashed line = break-even vs. free agency",
+    x = NULL, y = "Quasi-Sharpe Ratio", color = "Position"
   ) +
+  guides(fill = "none") +
   theme_minimal(base_size = 14) +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 ```
 
-## Linear vs Elite-Weighted
+## So Should You Draft Jeremiah Love at 10?
 
-The elite-weighted Sharpe ratio penalizes positions where high draft capital rarely produces
-truly elite contracts. Comparing the two variants reveals where the "ceiling" matters most.
+```{r love-hook, results='asis'}
+rb_sharpe <- sharpe %>% filter(pos_group == "RB")
+rb_top10 <- rb_sharpe %>% filter(tier == "Top 10")
+rb_day2 <- rb_sharpe %>% filter(tier == "Day 2")
+rb_fa <- fa_replacement %>% filter(pos_group == "RB")
 
-```{r linear-vs-elite, fig.height=8}
-sharpe_long <- sharpe %>%
-  filter(pos_group %in% key_positions) %>%
-  select(pos_group, tier, sharpe_linear, sharpe_elite) %>%
-  pivot_longer(cols = c(sharpe_linear, sharpe_elite),
-               names_to = "variant", values_to = "sharpe") %>%
-  mutate(variant = recode(variant,
-                          "sharpe_linear" = "Linear",
-                          "sharpe_elite" = "Elite-Weighted"))
+# Position with steepest drop-off
+dropoffs <- sharpe %>%
+  filter(tier %in% c("Top 10", "Day 2")) %>%
+  select(pos_group, tier, sharpe_elite) %>%
+  pivot_wider(names_from = tier, values_from = sharpe_elite) %>%
+  mutate(dropoff = `Top 10` - `Day 2`) %>%
+  filter(!is.na(dropoff)) %>%
+  arrange(desc(dropoff))
 
-ggplot(sharpe_long, aes(x = tier, y = sharpe, color = pos_group, group = pos_group)) +
-  geom_line(linewidth = 1.1) +
-  geom_point(size = 2.5) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.6) +
-  facet_wrap(~variant, ncol = 2) +
-  scale_color_manual(values = pos_colors) +
-  labs(
-    title = "Linear vs Elite-Weighted Sharpe Ratio",
-    subtitle = "Key positions | Elite variant rewards positions with high-ceiling outcomes",
-    x = NULL, y = "Quasi-Sharpe Ratio", color = "Position"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+steep_pos <- dropoffs %>% slice(1)
+
+cat(paste0(
+  "Now we can answer the question. Top-10 RBs hit at a high rate ",
+  "(**", percent(rb_top10$hit_rate, accuracy = 0.1), "**), but the Sharpe ratio is ",
+  "**", round(rb_top10$sharpe_elite, 2), "** — middle of the pack for top-10 picks.\n\n",
+
+  "The real issue is that you can get nearly the same return two rounds later. ",
+  "A Day 2 RB produces a Sharpe ratio of **", round(rb_day2$sharpe_elite, 2), "** — ",
+  "the dropoff from top 10 to Day 2 is just **",
+  round(rb_top10$sharpe_elite - rb_day2$sharpe_elite, 2), "**. ",
+  "Compare that to ", steep_pos$pos_group, ", where the top-10-to-Day-2 dropoff is **",
+  round(steep_pos$dropoff, 2), "**. The marginal value of a top-10 pick on a ",
+  steep_pos$pos_group, " is enormous; on a running back, it's modest.\n\n",
+
+  "Meanwhile, RBs are the cheapest position to replace in free agency — a starter-caliber RB ",
+  "costs just **", percent(rb_fa$fa_median_apy_cap_pct, accuracy = 0.1), " of the salary cap**, ",
+  "the lowest of any position. So not only is the draft capital largely wasted relative to other ",
+  "positions, but the alternative (signing an RB in free agency) is dirt cheap.\n"
+))
 ```
 
 ## Player Lookup
 
-Every drafted player in the dataset, ranked by the elite-weighted Sharpe ratio of their
-position-tier bucket. Players at the top were drafted into the most efficient slots; players
-at the bottom were drafted where the odds are worst.
+Every drafted player scored with a **player-level Sharpe ratio** that rewards both sustained
+playing time (snap ratio vs positional baseline) and second-contract quality. Higher values
+mean a player delivered more risk-adjusted return relative to what a free-agent starter would
+have cost.
 
-```{r player-lookup-table}
-player_lookup %>%
-  arrange(desc(sharpe_elite), desc(sharpe_linear), pick) %>%
-  mutate(
-    avg_snap_pct = percent(avg_snap_pct, accuracy = 0.1),
-    second_apy_cap_pct = ifelse(second_apy_cap_pct == 0, "--", percent(second_apy_cap_pct, accuracy = 0.01)),
-    sharpe_linear = round(sharpe_linear, 2),
-    sharpe_elite = round(sharpe_elite, 2)
-  ) %>%
-  gt() %>%
-  tab_header(
-    title = "Player Lookup: All Draft Picks by Elite Sharpe Ratio",
-    subtitle = paste0("Seasons ", min(player_lookup$season), "-", max(player_lookup$season),
-                      " | Sorted by position-tier elite Sharpe (best to worst)")
-  ) %>%
-  cols_label(
-    pfr_player_name = "Player",
-    pos_group = "Pos",
-    season = "Year",
-    pick = "Pick",
-    tier = "Tier",
-    is_hit = "Hit?",
-    avg_snap_pct = "Avg Snap %",
-    second_apy_cap_pct = "2nd Contract (Cap %)",
-    sharpe_linear = "Sharpe (L)",
-    sharpe_elite = "Sharpe (E)"
-  )
+**Player Sharpe = (Snap Ratio x Second Contract Cap% - FA Replacement Cost) / Bucket Volatility**
+
+```{r player-lookup-table, results='asis'}
+make_player_gt <- function(data, title, subtitle = NULL) {
+  tbl <- data %>%
+    mutate(rank = row_number()) %>%
+    select(rank, gsis_id, pfr_player_name, pos_group, team,
+           season, pick, snap_ratio, second_apy_cap_pct, player_sharpe)
+
+  tbl %>%
+    gt() %>%
+    gt_nfl_headshots(columns = "gsis_id", height = 35) %>%
+    gt_nfl_wordmarks(columns = "team", height = 25) %>%
+    cols_label(
+      rank = "",
+      gsis_id = "",
+      pfr_player_name = "PLAYER",
+      pos_group = "POS",
+      team = "TEAM",
+      season = "YEAR",
+      pick = "PICK",
+      snap_ratio = "SNAP RATIO",
+      second_apy_cap_pct = "2ND CONTRACT",
+      player_sharpe = "PLAYER SHARPE"
+    ) %>%
+    fmt_number(columns = c(snap_ratio, player_sharpe), decimals = 2) %>%
+    fmt_percent(columns = second_apy_cap_pct, decimals = 2) %>%
+    data_color(
+      columns = player_sharpe,
+      palette = c("#f7f7f7", "#c6dbef", "#4292c6", "#08519c"),
+      domain = NULL
+    ) %>%
+    data_color(
+      columns = snap_ratio,
+      palette = c("#f7f7f7", "#c7e9c0", "#41ab5d", "#006d2c"),
+      domain = NULL
+    ) %>%
+    data_color(
+      columns = second_apy_cap_pct,
+      palette = c("#f7f7f7", "#dadaeb", "#9e9ac8", "#6a51a3"),
+      domain = NULL
+    ) %>%
+    tab_header(title = title, subtitle = subtitle) %>%
+    tab_style(
+      style = cell_text(weight = "bold"),
+      locations = cells_column_labels()
+    ) %>%
+    tab_style(
+      style = cell_text(size = px(13)),
+      locations = cells_body()
+    ) %>%
+    tab_options(
+      table.font.size = px(13),
+      heading.title.font.size = px(18),
+      heading.subtitle.font.size = px(13),
+      column_labels.font.size = px(11),
+      data_row.padding = px(4)
+    )
+}
+
+top25 <- player_lookup %>%
+  filter(!is.na(player_sharpe)) %>%
+  arrange(desc(player_sharpe)) %>%
+  head(25)
+
+top25_gt <- make_player_gt(
+  top25,
+  title = "Top 25 Draft Picks by Player-Level Sharpe Ratio",
+  subtitle = "Snap Ratio = avg snap % / positional baseline | 2nd Contract = APY as % of salary cap"
+)
+
+gtsave(top25_gt, filename = "charts/player_lookup_top25.png", vwidth = 900)
+cat("![Top 25 Draft Picks by Player-Level Sharpe Ratio](charts/player_lookup_top25.png)\n")
 ```
 
 ## Key Takeaways
@@ -324,31 +472,24 @@ player_lookup %>%
 # Best top-10 value
 best_top10 <- sharpe %>%
   filter(tier == "Top 10") %>%
-  arrange(desc(sharpe_linear)) %>%
+  arrange(desc(sharpe_elite)) %>%
   slice(1)
 
 # Worst top-10 value
 worst_top10 <- sharpe %>%
   filter(tier == "Top 10") %>%
-  arrange(sharpe_linear) %>%
-  slice(1)
-
-# Biggest elite-weight gainer (position where elite >> linear in top 10)
-elite_gain <- sharpe %>%
-  filter(tier == "Top 10") %>%
-  mutate(elite_delta = sharpe_elite - sharpe_linear) %>%
-  arrange(desc(elite_delta)) %>%
+  arrange(sharpe_elite) %>%
   slice(1)
 
 # Best Day 2 value
 best_day2 <- sharpe %>%
   filter(tier == "Day 2") %>%
-  arrange(desc(sharpe_linear)) %>%
+  arrange(desc(sharpe_elite)) %>%
   slice(1)
 
 # Position that stays positive longest
 stays_positive <- sharpe %>%
-  filter(sharpe_linear > 0) %>%
+  filter(sharpe_elite > 0) %>%
   group_by(pos_group) %>%
   summarize(deepest_positive = max(as.numeric(tier)), .groups = "drop") %>%
   arrange(desc(deepest_positive)) %>%
@@ -356,24 +497,90 @@ stays_positive <- sharpe %>%
 
 cat(paste0(
   "- **Best top-10 Sharpe ratio**: ", best_top10$pos_group,
-  " (", round(best_top10$sharpe_linear, 2), ") -- ",
+  " (", round(best_top10$sharpe_elite, 2), ") -- ",
   "drafting a ", best_top10$pos_group, " in the top 10 offers the best risk-adjusted return.\n\n",
 
   "- **Worst top-10 Sharpe ratio**: ", worst_top10$pos_group,
-  " (", round(worst_top10$sharpe_linear, 2), ") -- ",
+  " (", round(worst_top10$sharpe_elite, 2), ") -- ",
   "top-10 ", worst_top10$pos_group, " picks have the weakest return relative to variance.\n\n",
 
-  "- **Biggest elite-weight gainer**: ", elite_gain$pos_group,
-  " -- the elite-weighted variant shifts the Sharpe ratio by ",
-  round(elite_gain$elite_delta, 2), " vs. the linear version in the top 10, ",
-  "because elite ", elite_gain$pos_group, " contracts are disproportionately large.\n\n",
-
   "- **Best Day 2 value**: ", best_day2$pos_group,
-  " (", round(best_day2$sharpe_linear, 2), ") -- ",
+  " (", round(best_day2$sharpe_elite, 2), ") -- ",
   "second-round ", best_day2$pos_group, " picks offer the strongest mid-round return.\n\n",
 
   "- **Deepest value**: ", stays_positive$pos_group,
   " maintains a positive Sharpe ratio deeper into the draft than any other position, ",
   "suggesting sustained value even with later picks.\n"
 ))
+```
+
+---
+
+## Appendix: Round 1 Leaderboard
+
+The overall leaderboard is dominated by late-round steals. Here are the best first-round picks
+by player Sharpe — the guys who actually justified their draft capital.
+
+```{r round1-leaderboard, results='asis'}
+rd1 <- player_lookup %>%
+  filter(round(pick) <= 32, !is.na(player_sharpe)) %>%
+  arrange(desc(player_sharpe)) %>%
+  head(25)
+
+rd1_gt <- make_player_gt(
+  rd1,
+  title = "Top 25 Round 1 Picks by Player Sharpe",
+  subtitle = "First-round picks only | Snap Ratio x Contract relative to FA replacement cost"
+)
+
+gtsave(rd1_gt, filename = "charts/player_lookup_rd1.png", vwidth = 900)
+cat("![Top 25 Round 1 Picks by Player Sharpe](charts/player_lookup_rd1.png)\n")
+```
+
+## Appendix: Top 5 by Position Group
+
+```{r position-leaderboards, results='asis'}
+pos_groups <- sort(unique(player_lookup$pos_group))
+
+for (pg in pos_groups) {
+  top5 <- player_lookup %>%
+    filter(pos_group == pg, !is.na(player_sharpe)) %>%
+    arrange(desc(player_sharpe)) %>%
+    head(5)
+
+  if (nrow(top5) == 0) next
+
+  tbl <- make_player_gt(
+    top5,
+    title = paste("Top 5", pg, "by Player Sharpe"),
+    subtitle = "All rounds"
+  )
+
+  fname <- paste0("top5_", tolower(pg), ".png")
+  gtsave(tbl, filename = paste0("charts/", fname), vwidth = 900)
+  cat(paste0("![Top 5 ", pg, "](charts/", fname, ")\n\n"))
+}
+```
+
+## Appendix: Top 5 by Position Group (Round 1 Only)
+
+```{r position-leaderboards-rd1, results='asis'}
+for (pg in pos_groups) {
+  top5_rd1 <- player_lookup %>%
+    filter(pos_group == pg, pick <= 32, !is.na(player_sharpe)) %>%
+    arrange(desc(player_sharpe)) %>%
+    head(5)
+
+  if (nrow(top5_rd1) == 0) next
+
+  tbl <- make_player_gt(
+    top5_rd1,
+    title = paste("Top 5", pg, "by Player Sharpe (Round 1)"),
+    subtitle = "First-round picks only"
+  )
+
+  fname <- paste0("top5_rd1_", tolower(pg), ".png")
+  gtsave(tbl, filename = paste0("charts/", fname), vwidth = 900)
+  cat(paste0("![Top 5 ", pg, " Round 1](charts/", fname, ")\n\n"))
+}
 ```
