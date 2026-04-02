@@ -160,10 +160,17 @@ cat(sprintf("  Matched %d second contracts\n", nrow(second_contracts)))
 
 # --- 6. Free Agency Replacement Cost ------------------------------------------
 
-cat("Computing FA replacement cost by position...\n")
+# Use starter-caliber FA contracts only: top 32 contracts per position per year.
+# This removes vet-minimum noise and answers "what does a real starter cost
+# on the open market?" — the true alternative to drafting.
+
+cat("Computing FA replacement cost by position (top-32 per year)...\n")
 
 fa_replacement <- contracts |>
   filter(apy_cap_pct > 0.001) |>
+  group_by(pos_group, year_signed) |>
+  slice_max(apy_cap_pct, n = 32, with_ties = FALSE) |>
+  ungroup() |>
   group_by(pos_group) |>
   summarise(
     fa_median_apy_cap_pct = median(apy_cap_pct, na.rm = TRUE),
@@ -172,7 +179,7 @@ fa_replacement <- contracts |>
     .groups = "drop"
   )
 
-cat("\n  FA replacement cost (median apy_cap_pct) by position:\n")
+cat("\n  FA replacement cost (median of top-32 per year) by position:\n")
 print(fa_replacement, n = Inf)
 
 # --- 7. Final Join ------------------------------------------------------------
