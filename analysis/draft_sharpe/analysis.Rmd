@@ -285,17 +285,13 @@ ggplot(sharpe_long, aes(x = tier, y = sharpe, color = pos_group, group = pos_gro
 
 ## Player Lookup
 
-Recent draft picks with their outcomes and Sharpe context. This table shows the last 5 draft
-classes, filtered to players with second-contract data or recent picks still on rookie deals.
+Every drafted player in the dataset, ranked by the elite-weighted Sharpe ratio of their
+position-tier bucket. Players at the top were drafted into the most efficient slots; players
+at the bottom were drafted where the odds are worst.
 
 ```{r player-lookup-table}
-max_season <- max(player_lookup$season)
-recent <- player_lookup %>%
-  filter(season >= max_season - 4) %>%
-  arrange(season, pick) %>%
-  head(50)
-
-recent %>%
+player_lookup %>%
+  arrange(desc(sharpe_elite), desc(sharpe_linear), pick) %>%
   mutate(
     avg_snap_pct = percent(avg_snap_pct, accuracy = 0.1),
     second_apy_cap_pct = ifelse(second_apy_cap_pct == 0, "--", percent(second_apy_cap_pct, accuracy = 0.01)),
@@ -304,8 +300,9 @@ recent %>%
   ) %>%
   gt() %>%
   tab_header(
-    title = "Player Lookup: Recent Draft Classes",
-    subtitle = paste0("Seasons ", max_season - 4, "-", max_season, " | Top 50 by pick")
+    title = "Player Lookup: All Draft Picks by Elite Sharpe Ratio",
+    subtitle = paste0("Seasons ", min(player_lookup$season), "-", max(player_lookup$season),
+                      " | Sorted by position-tier elite Sharpe (best to worst)")
   ) %>%
   cols_label(
     pfr_player_name = "Player",
