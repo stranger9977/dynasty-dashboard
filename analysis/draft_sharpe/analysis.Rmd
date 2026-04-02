@@ -1,0 +1,25 @@
+---
+title: "NFL Draft Quasi-Sharpe Ratio Analysis"
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  fig.width = 10, fig.height = 7, dpi = 300,
+  fig.path = "output/charts/"
+)
+library(tidyverse)
+library(arrow)
+library(gt)
+library(scales)
+library(ggridges)
+```
+
+```{r load-data}
+df <- read_parquet("data/draft_sharpe_analysis.parquet")
+```
+
+<!-- Report sections will be added in subsequent tasks. -->
