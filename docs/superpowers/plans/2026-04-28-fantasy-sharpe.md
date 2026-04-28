@@ -6,7 +6,7 @@
 
 **Architecture:** R-based data pipeline writes parquet artifacts under `analysis/fantasy_sharpe/data/`. R Markdown article reads those artifacts and renders to self-contained HTML. Python Streamlit view reads the same artifacts (via pyarrow) and renders interactive per-rookie projections. Two parallel Sharpes per cohort: Production (PPG-share, win-now framing) and Asset (peak KTC, rebuild framing).
 
-**Tech Stack:** R 4.x with `tidyverse`, `nflreadr`, `arrow`, `glmnet`, `testthat`, `rmarkdown`. Python 3.12 with `pandas`, `pyarrow`, `streamlit`, `pytest`. Repo: `/Users/nick/projects/dynasty-dashboard`.
+**Tech Stack:** R 4.x with `tidyverse`, `nflreadr`, `arrow`, `quantreg`, `testthat`, `rmarkdown`. Python 3.12 with `pandas`, `pyarrow`, `streamlit`, `pytest`. Repo: `/Users/nick/projects/dynasty-dashboard`.
 
 **Spec:** `docs/superpowers/specs/2026-04-28-fantasy-sharpe-design.md`
 
@@ -1492,13 +1492,15 @@ git commit -m "feat(fantasy_sharpe): add startup-ADP analysis branch"
 
 ---
 
-## Phase 6: Projection model
+## Phase 6: Projection model (quantile regression)
 
-### Task 6.1: Feature assembly with tests
+### Task 6.1: Feature assembly + quantile-regression model with tests
 
 **Files:**
 - Create: `analysis/fantasy_sharpe/R/projection_model.R`
 - Create: `analysis/fantasy_sharpe/tests/testthat/test-projection-model.R`
+
+**Methodology note:** Mirrors the existing draft-Sharpe counter-analysis (`R/grader_projection.R` in the original `draft-sharpe-analysis` repo): per-position quantile regression at τ ∈ {0.10, 0.50, 0.90} produces floor / median / ceiling outcomes. Falls back to empirical positional quantiles when features are missing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1523,7 +1525,7 @@ test_that("assemble_features joins draft picks, NGS, KTC into one frame per rook
   expect_equal(feats$pick, 8L)
 })
 
-test_that("fit_projection_model returns coefficients per position with finite values", {
+test_that("fit_quantile_models returns one rq fit per position per tau", {
   source(here::here("analysis/fantasy_sharpe/R/projection_model.R"))
 
   set.seed(42)
@@ -1540,15 +1542,22 @@ test_that("fit_projection_model returns coefficients per position with finite va
     target_ppg_share = runif(n, 0.1, 1.5)
   )
 
-  models <- fit_projection_model(fake, target = "target_ppg_share")
+  models <- fit_quantile_models(fake, target = "target_ppg_share")
+  # Expect named list per position, each containing q10/q50/q90 fits.
   expect_named(models, c("WR", "RB"), ignore.order = TRUE)
-  for (m in models) {
-    expect_true(is.list(m) && !is.null(m$coefficients))
-    expect_true(all(is.finite(m$coefficients)))
+  for (pos in names(models)) {
+    expect_named(models[[pos]]$fits, c("q10", "q50", "q90"), ignore.order = TRUE)
+    # Each fit is either an rq object or NULL (fallback)
+    for (q in c("q10", "q50", "q90")) {
+      f <- models[[pos]]$fits[[q]]
+      expect_true(inherits(f, "rq") || is.null(f))
+    }
+    # Empirical fallback quantiles should always be present
+    expect_true(all(c("floor", "median", "ceiling") %in% names(models[[pos]]$empirical)))
   }
 })
 
-test_that("predict_projection returns mean and PI bounds", {
+test_that("predict_quantile_projection returns floor, median, ceiling per row", {
   source(here::here("analysis/fantasy_sharpe/R/projection_model.R"))
 
   set.seed(7)
@@ -1564,14 +1573,43 @@ test_that("predict_projection returns mean and PI bounds", {
     ktc_value_snapshot = sample(2000:9000, n),
     target_ppg_share = runif(n, 0.1, 1.5)
   )
-  models <- fit_projection_model(fake, target = "target_ppg_share")
+  models <- fit_quantile_models(fake, target = "target_ppg_share")
 
   newdata <- fake[1, , drop = FALSE]
-  preds <- predict_projection(models, newdata)
+  preds <- predict_quantile_projection(models, newdata)
   expect_equal(nrow(preds), 1)
-  expect_true(all(c("predicted", "pi_lower_95", "pi_upper_95") %in% colnames(preds)))
-  expect_lte(preds$pi_lower_95, preds$predicted)
-  expect_gte(preds$pi_upper_95, preds$predicted)
+  expect_true(all(c("floor", "median", "ceiling") %in% colnames(preds)))
+  # Floor must be <= median <= ceiling (after monotonization)
+  expect_lte(preds$floor, preds$median)
+  expect_lte(preds$median, preds$ceiling)
+})
+
+test_that("predict_quantile_projection falls back to empirical quantiles when features missing", {
+  source(here::here("analysis/fantasy_sharpe/R/projection_model.R"))
+
+  set.seed(11)
+  n <- 30
+  train <- tibble::tibble(
+    position = rep("WR", n),
+    pick = sample(1:200, n),
+    ras = runif(n, 4, 10),
+    forty = runif(n, 4.3, 4.8),
+    vertical = runif(n, 28, 42),
+    weight = runif(n, 180, 240),
+    ktc_value_snapshot = sample(2000:9000, n),
+    target_ppg_share = runif(n, 0.1, 1.5)
+  )
+  models <- fit_quantile_models(train, target = "target_ppg_share")
+
+  # Newdata with all features NA — must fall back to empirical
+  miss <- tibble::tibble(
+    position = "WR", pick = NA_real_, ras = NA_real_, forty = NA_real_,
+    vertical = NA_real_, weight = NA_real_, ktc_value_snapshot = NA_real_
+  )
+  out <- predict_quantile_projection(models, miss)
+  expect_equal(out$floor, models$WR$empirical$floor)
+  expect_equal(out$median, models$WR$empirical$median)
+  expect_equal(out$ceiling, models$WR$empirical$ceiling)
 })
 ```
 
@@ -1589,14 +1627,19 @@ Create `analysis/fantasy_sharpe/R/projection_model.R`:
 
 ```r
 # analysis/fantasy_sharpe/R/projection_model.R
-# Per-position elastic-net projection of fantasy outcomes from NGS + draft + KTC features.
+# Per-position quantile regression at tau = {0.10, 0.50, 0.90} for fantasy outcomes.
+# Mirrors R/grader_projection.R from the original draft-sharpe-analysis repo.
 
 suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
-  library(glmnet)
+  library(quantreg)
 })
 source(here::here("analysis/fantasy_sharpe/R/constants.R"))
+
+PROJECTION_TAUS <- c(floor = 0.10, median = 0.50, ceiling = 0.90)
+PROJECTION_FEATURE_COLS <- c("pick", "ras", "forty", "vertical",
+                             "weight", "ktc_value_snapshot")
 
 assemble_features <- function(draft, ngs, ktc_snapshot) {
   draft |>
@@ -1616,56 +1659,88 @@ assemble_features <- function(draft, ngs, ktc_snapshot) {
     )
 }
 
-# Fit one elastic-net per position. Returns named list of {coefficients, residual_sd}.
-fit_projection_model <- function(features_with_target, target,
-                                 alpha = 0.5,  # elastic-net mix
-                                 feature_cols = c("pick", "ras", "forty", "vertical",
-                                                  "weight", "ktc_value_snapshot")) {
+# Fit three quantile regressions (tau = 0.10, 0.50, 0.90) per position.
+# Also stores empirical positional quantiles as a fallback for prospects whose
+# features are NA at predict time. Returns:
+#   list[position] = list(
+#     fits = list(q10 = rq_or_null, q50 = ..., q90 = ...),
+#     empirical = list(floor = num, median = num, ceiling = num),
+#     n = integer
+#   )
+fit_quantile_models <- function(features_with_target, target,
+                                feature_cols = PROJECTION_FEATURE_COLS,
+                                taus = PROJECTION_TAUS) {
   positions <- unique(features_with_target$position)
   out <- vector("list", length(positions))
   names(out) <- positions
 
+  formula_str <- paste(target, "~", paste(c("log(pick + 1)", setdiff(feature_cols, "pick")),
+                                          collapse = " + "))
+  fml <- stats::as.formula(formula_str)
+
   for (pos in positions) {
     sub <- features_with_target |>
       dplyr::filter(position == !!pos) |>
-      dplyr::select(dplyr::all_of(feature_cols), dplyr::all_of(target)) |>
+      dplyr::select(dplyr::all_of(c(feature_cols, target))) |>
       tidyr::drop_na()
-    if (nrow(sub) < 5) {
-      out[[pos]] <- list(
-        coefficients = setNames(rep(NA_real_, length(feature_cols) + 1),
-                                c("(Intercept)", feature_cols)),
-        residual_sd = NA_real_,
-        n = nrow(sub)
-      )
-      next
+    pos_all <- features_with_target |>
+      dplyr::filter(position == !!pos) |>
+      dplyr::pull(.data[[target]])
+    empirical <- list(
+      floor   = stats::quantile(pos_all, taus[["floor"]], na.rm = TRUE) |> unname(),
+      median  = stats::quantile(pos_all, taus[["median"]], na.rm = TRUE) |> unname(),
+      ceiling = stats::quantile(pos_all, taus[["ceiling"]], na.rm = TRUE) |> unname()
+    )
+
+    fits <- list(q10 = NULL, q50 = NULL, q90 = NULL)
+    if (nrow(sub) >= 8) {
+      for (q_name in names(taus)) {
+        tau_val <- taus[[q_name]]
+        slot <- sprintf("q%02d", round(tau_val * 100))
+        fits[[slot]] <- tryCatch(
+          quantreg::rq(fml, tau = tau_val, data = sub),
+          error = function(e) NULL
+        )
+      }
     }
-    x <- as.matrix(sub[, feature_cols])
-    y <- sub[[target]]
-    cv <- glmnet::cv.glmnet(x, y, alpha = alpha, nfolds = max(3, min(5, nrow(sub) - 1)))
-    coefs <- as.matrix(coef(cv, s = "lambda.min"))[, 1]
-    pred <- as.numeric(predict(cv, newx = x, s = "lambda.min"))
-    residual_sd <- stats::sd(y - pred)
-    out[[pos]] <- list(coefficients = coefs, residual_sd = residual_sd, n = nrow(sub))
+
+    out[[pos]] <- list(fits = fits, empirical = empirical, n = nrow(sub))
   }
   out
 }
 
-# Apply per-position model to new rookies. Output is a frame with predicted + 95% PI.
-predict_projection <- function(models, newdata,
-                               feature_cols = c("pick", "ras", "forty", "vertical",
-                                                "weight", "ktc_value_snapshot")) {
-  out <- newdata |> dplyr::mutate(predicted = NA_real_, pi_lower_95 = NA_real_, pi_upper_95 = NA_real_)
+# Predict floor / median / ceiling per row of newdata. Falls back to empirical
+# positional quantiles when feature cols are NA or the rq fit is unavailable.
+# Monotonizes so floor <= median <= ceiling.
+predict_quantile_projection <- function(models, newdata,
+                                        feature_cols = PROJECTION_FEATURE_COLS) {
+  out <- newdata |>
+    dplyr::mutate(floor = NA_real_, median = NA_real_, ceiling = NA_real_)
+
   for (i in seq_len(nrow(out))) {
     pos <- out$position[i]
-    if (is.null(models[[pos]]) || any(is.na(models[[pos]]$coefficients))) next
-    coefs <- models[[pos]]$coefficients
-    sd_resid <- models[[pos]]$residual_sd
-    x_row <- as.numeric(out[i, feature_cols, drop = TRUE])
-    if (any(is.na(x_row))) next
-    yhat <- coefs[["(Intercept)"]] + sum(coefs[feature_cols] * x_row)
-    out$predicted[i] <- yhat
-    out$pi_lower_95[i] <- yhat - 1.96 * sd_resid
-    out$pi_upper_95[i] <- yhat + 1.96 * sd_resid
+    m <- models[[pos]]
+    if (is.null(m)) next
+
+    row <- out[i, feature_cols, drop = FALSE]
+    has_features <- !any(is.na(row))
+    fits_ok <- !is.null(m$fits$q10) && !is.null(m$fits$q50) && !is.null(m$fits$q90)
+
+    if (has_features && fits_ok) {
+      f_pred <- as.numeric(stats::predict(m$fits$q10, newdata = row))
+      m_pred <- as.numeric(stats::predict(m$fits$q50, newdata = row))
+      c_pred <- as.numeric(stats::predict(m$fits$q90, newdata = row))
+    } else {
+      f_pred <- m$empirical$floor
+      m_pred <- m$empirical$median
+      c_pred <- m$empirical$ceiling
+    }
+
+    # Monotonize (rare crossings can occur with small samples)
+    sorted <- sort(c(f_pred, m_pred, c_pred))
+    out$floor[i]   <- sorted[1]
+    out$median[i]  <- sorted[2]
+    out$ceiling[i] <- sorted[3]
   }
   out
 }
@@ -1677,14 +1752,14 @@ predict_projection <- function(models, newdata,
 Rscript analysis/fantasy_sharpe/tests/testthat.R
 ```
 
-Expected: all 3 projection_model tests pass. (Tests use synthetic data — no nflreadr fetch.)
+Expected: all 4 projection_model tests pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add analysis/fantasy_sharpe/R/projection_model.R \
         analysis/fantasy_sharpe/tests/testthat/test-projection-model.R
-git commit -m "feat(fantasy_sharpe): elastic-net projection model"
+git commit -m "feat(fantasy_sharpe): quantile-regression projection (floor/median/ceiling)"
 ```
 
 ### Task 6.2: Wire projection into the pipeline
@@ -1716,12 +1791,12 @@ train_features <- assemble_features(
     by = "pfr_player_name"
   )
 
-# Fit two models per position: PPG share + peak KTC.
-models_share <- fit_projection_model(
+# Fit per-position quantile-regression models for each target.
+models_share <- fit_quantile_models(
   train_features |> dplyr::rename(target_ppg_share = ppg_share),
   target = "target_ppg_share"
 )
-models_ktc <- fit_projection_model(
+models_ktc <- fit_quantile_models(
   train_features |> dplyr::rename(target_peak_ktc = peak_ktc),
   target = "target_peak_ktc"
 )
@@ -1733,28 +1808,34 @@ ktc_2026 <- ktc_now |>
   dplyr::transmute(pfr_player_name = name, ktc_value_snapshot = ktc_value)
 features_2026 <- assemble_features(draft_2026, ngs, ktc_2026)
 
-predictions_2026 <- features_2026 |>
-  dplyr::bind_cols(
-    predict_projection(models_share, features_2026) |>
-      dplyr::transmute(predicted_ppg_share = predicted,
-                       ppg_share_pi_lo = pi_lower_95,
-                       ppg_share_pi_hi = pi_upper_95)
-  ) |>
-  dplyr::bind_cols(
-    predict_projection(models_ktc, features_2026) |>
-      dplyr::transmute(predicted_peak_ktc = predicted,
-                       peak_ktc_pi_lo = pi_lower_95,
-                       peak_ktc_pi_hi = pi_upper_95)
-  )
+share_preds <- predict_quantile_projection(models_share, features_2026) |>
+  dplyr::transmute(ppg_share_floor = floor,
+                   ppg_share_median = median,
+                   ppg_share_ceiling = ceiling)
+ktc_preds <- predict_quantile_projection(models_ktc, features_2026) |>
+  dplyr::transmute(peak_ktc_floor = floor,
+                   peak_ktc_median = median,
+                   peak_ktc_ceiling = ceiling)
 
-# Pack model coefficients into a long frame for downstream inspection.
+predictions_2026 <- features_2026 |>
+  dplyr::bind_cols(share_preds) |>
+  dplyr::bind_cols(ktc_preds)
+
+# Flatten quantile-regression coefficients for downstream inspection.
 flatten_models <- function(models, target_label) {
   purrr::imap_dfr(models, \(m, pos) {
-    if (is.null(m$coefficients) || all(is.na(m$coefficients))) return(NULL)
-    tibble::tibble(target = target_label, position = pos,
-                   feature = names(m$coefficients),
-                   coefficient = as.numeric(m$coefficients),
-                   residual_sd = m$residual_sd, n = m$n)
+    rows <- list()
+    for (q_name in names(m$fits)) {
+      f <- m$fits[[q_name]]
+      if (is.null(f)) next
+      coefs <- stats::coef(f)
+      rows[[q_name]] <- tibble::tibble(
+        target = target_label, position = pos, tau = q_name,
+        feature = names(coefs), coefficient = as.numeric(coefs),
+        n = m$n
+      )
+    }
+    dplyr::bind_rows(rows)
   })
 }
 model_coefs <- dplyr::bind_rows(
@@ -1957,15 +2038,21 @@ git commit -m "feat(fantasy_sharpe): article sections — startup, divergence, p
 ```rmd
 # Projection model coefficients
 
-The counter-analysis projection uses NGS combine metrics, NFL draft pick, and
-at-snapshot KTC value as features. Per-position elastic-net regularizes against
-the small training sample (3 cohorts).
+The counter-analysis projection uses NGS combine metrics, `log(pick + 1)` for NFL
+draft pick, and at-snapshot KTC value as features. Per-position quantile regression
+at τ ∈ {0.10, 0.50, 0.90} produces floor / median / ceiling outcomes — better suited
+than symmetric Gaussian intervals for the skewed distribution of fantasy outcomes.
 
 ```{r coefs-table}
 coefs |>
   filter(feature != "(Intercept)") |>
   mutate(coefficient = round(coefficient, 4)) |>
-  tidyr::pivot_wider(id_cols = c(position, target), names_from = feature, values_from = coefficient) |>
+  tidyr::pivot_wider(
+    id_cols = c(position, target, feature),
+    names_from = tau,
+    values_from = coefficient,
+    names_prefix = "tau_"
+  ) |>
   knitr::kable()
 ```
 
@@ -2012,13 +2099,13 @@ python3 -c "
 import pandas as pd
 df = pd.DataFrame([
     dict(pfr_player_name='Cam Skattebo', position='RB', team='NYG', pick=27,
-         ktc_value_snapshot=6500, predicted_ppg_share=0.85,
-         ppg_share_pi_lo=0.42, ppg_share_pi_hi=1.28,
-         predicted_peak_ktc=7900, peak_ktc_pi_lo=5800, peak_ktc_pi_hi=10000),
+         ktc_value_snapshot=6500,
+         ppg_share_floor=0.42, ppg_share_median=0.85, ppg_share_ceiling=1.28,
+         peak_ktc_floor=5800, peak_ktc_median=7900, peak_ktc_ceiling=10000),
     dict(pfr_player_name='Tetairoa McMillan', position='WR', team='CAR', pick=5,
-         ktc_value_snapshot=8100, predicted_ppg_share=1.05,
-         ppg_share_pi_lo=0.62, ppg_share_pi_hi=1.48,
-         predicted_peak_ktc=9100, peak_ktc_pi_lo=7100, peak_ktc_pi_hi=11100),
+         ktc_value_snapshot=8100,
+         ppg_share_floor=0.62, ppg_share_median=1.05, ppg_share_ceiling=1.48,
+         peak_ktc_floor=7100, peak_ktc_median=9100, peak_ktc_ceiling=11100),
 ])
 df.to_parquet('tests/fixtures/fantasy_sharpe_projection_fixture.parquet')
 print('wrote fixture')
@@ -2054,9 +2141,9 @@ def test_fixture_has_required_columns():
     df = pd.read_parquet(FIXTURE)
     required = {
         "pfr_player_name", "position", "team", "pick",
-        "ktc_value_snapshot", "predicted_ppg_share",
-        "ppg_share_pi_lo", "ppg_share_pi_hi",
-        "predicted_peak_ktc", "peak_ktc_pi_lo", "peak_ktc_pi_hi",
+        "ktc_value_snapshot",
+        "ppg_share_floor", "ppg_share_median", "ppg_share_ceiling",
+        "peak_ktc_floor", "peak_ktc_median", "peak_ktc_ceiling",
     }
     assert required.issubset(df.columns)
 
@@ -2148,13 +2235,13 @@ def render() -> None:
 
     view = df[df["position"].isin(position_filter)].copy()
 
-    view = view.sort_values("predicted_ppg_share", ascending=False, na_position="last")
+    view = view.sort_values("ppg_share_median", ascending=False, na_position="last")
 
     cols_to_show = [
         "pfr_player_name", "position", "team", "pick",
         "ktc_value_snapshot",
-        "predicted_ppg_share", "ppg_share_pi_lo", "ppg_share_pi_hi",
-        "predicted_peak_ktc", "peak_ktc_pi_lo", "peak_ktc_pi_hi",
+        "ppg_share_floor", "ppg_share_median", "ppg_share_ceiling",
+        "peak_ktc_floor", "peak_ktc_median", "peak_ktc_ceiling",
     ]
     available = [c for c in cols_to_show if c in view.columns]
     st.dataframe(
@@ -2164,12 +2251,12 @@ def render() -> None:
             "team": "Team",
             "pick": "NFL Pick",
             "ktc_value_snapshot": "KTC (post-draft)",
-            "predicted_ppg_share": "Proj PPG share",
-            "ppg_share_pi_lo": "Bear (95% PI)",
-            "ppg_share_pi_hi": "Bull (95% PI)",
-            "predicted_peak_ktc": "Proj peak KTC",
-            "peak_ktc_pi_lo": "KTC bear",
-            "peak_ktc_pi_hi": "KTC bull",
+            "ppg_share_floor": "PPG share — Floor (q10)",
+            "ppg_share_median": "PPG share — Median",
+            "ppg_share_ceiling": "PPG share — Ceiling (q90)",
+            "peak_ktc_floor": "Peak KTC — Floor",
+            "peak_ktc_median": "Peak KTC — Median",
+            "peak_ktc_ceiling": "Peak KTC — Ceiling",
         }),
         use_container_width=True,
     )
@@ -2296,7 +2383,7 @@ git commit -m "docs(fantasy_sharpe): final rendered article"
 - Replacement at QB24/RB24/WR36/TE12 — `REPLACEMENT_RANK` in Task 1.1.
 - KTC refresh post-NFL-draft — Phase 2.
 - NGS + draft + KTC projection model — Phase 6.
-- 95% PI rendered as bull/bear bands — Task 6.1, surfaced in view at Task 8.3.
+- Quantile-regression floor/median/ceiling — Task 6.1, surfaced in view at Task 8.3 as columns `ppg_share_{floor,median,ceiling}` and `peak_ktc_{floor,median,ceiling}`.
 - Rookie ADP and Startup ADP both — Tasks 5.1 (rookie) and 5.2 (startup).
 - Schema + formula tests — Phases 1, 3, 4, 6, 8.
 

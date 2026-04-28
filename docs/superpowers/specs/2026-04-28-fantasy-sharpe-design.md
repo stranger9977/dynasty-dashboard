@@ -57,7 +57,7 @@ Positions: QB, RB, WR, TE only.
 
 - **Return per player:** 4-year PPG share. Concretely:
   - **Numerator** = (total fantasy points across the player's Y1-Y4 seasons) / (4 × 17 = 68 expected games). Using expected games rather than games played means injuries and benchings naturally drag the return without needing extra logic.
-  - **Denominator** = positional baseline PPG, computed per-season from QB1-24 / RB1-36 / WR1-48 / TE1-12 PPG, then averaged across the player's four seasons (so the baseline tracks the era a given player entered).
+  - **Denominator** = positional baseline PPG, computed per-season as the **mean PPG of the startable pool** (QB1-24 / RB1-24 / WR1-36 / TE1-12, matching superflex 12-team starting lineups), then averaged across the player's four seasons (so the baseline tracks the era a given player entered).
   - **Share** = numerator / denominator. A share of 1.0 means the player produced like a positional starter; 0.5 means half that; 1.5 means top-tier.
 - **Replacement:** PPG share of QB24 / RB24 / WR36 / TE12 (superflex starting baselines for a 12-team league), measured per-season then averaged across the player's rookie window.
 - **Hit:** player's PPG share ≥ 0.67 (direct port of the original 67%-of-baseline rule).
@@ -81,10 +81,11 @@ Default: half-PPR, superflex. Toggles: PPR / half / std and 1QB / superflex. KTC
 
 Trained on the same 2020-2022 cohorts (so we have completed 4-year windows). Per player:
 
-- **Features:** NGS prospect metrics (RAS, athletic measurables, college production), NFL draft pick number, KTC superflex value at one week post-NFL-draft.
+- **Features:** NGS prospect metrics (RAS, athletic measurables, college production), `log(pick)` for NFL draft pick number, KTC superflex value at one week post-NFL-draft. Mirrors `R/grader_projection.R` from the existing draft Sharpe counter-analysis.
 - **Targets:** 4-year PPG share, peak KTC value (fit separately, two models).
-- **Model:** simple regularized regression (e.g., elastic net) per position, owing to small sample sizes (~20-40 fantasy-relevant rookies/cohort/position combined).
-- **Outputs:** per-player projection mean and prediction interval (95%) for both targets, written to `analysis/fantasy_sharpe/data/projection_model.parquet`.
+- **Model:** **quantile regression** (`quantreg::rq`) at τ ∈ {0.10, 0.50, 0.90} per (position × target). Three quantile fits per model produce floor / median / ceiling outcomes. Quantile regression is robust to outliers and produces asymmetric intervals — important because dynasty fantasy outcomes are skewed (hard floor at 0, long upside tail). Matches the existing counter-analysis methodology.
+- **Fallback:** when feature data is missing for a prospect, fall back to empirical positional quantiles of the training cohort's outcomes (same fallback strategy as the existing draft-Sharpe counter-analysis).
+- **Outputs:** per-player floor/median/ceiling projections for both targets, written to `analysis/fantasy_sharpe/data/projection_model.parquet`.
 
 The Streamlit view loads coefficients + 2026-rookie features and renders projections deterministically — no model fitting in the view.
 
@@ -162,7 +163,7 @@ Registered in `components/sidebar.py` under a new entry like "Rookie Projections
 **Sidebar controls:** scoring (PPR / half / std), format (1QB / superflex), position filter.
 
 **Main view:**
-- Per-2026-rookie row: name, NFL team, NFL pick, current KTC value, **projected 4-yr PPG share** (rendered with the model's 95% prediction interval as bull/bear bands), **projected peak KTC** (same 95% PI), tier-implied Production Sharpe and Asset Sharpe, "exceeds tier expectation by X%" call-out.
+- Per-2026-rookie row: name, NFL team, NFL pick, current KTC value, **projected 4-yr PPG share** (floor / median / ceiling from the τ=0.10/0.50/0.90 quantile fits, rendered as bear / base / bull), **projected peak KTC** (same three quantiles), tier-implied Production Sharpe and Asset Sharpe, "exceeds tier expectation by X%" call-out.
 - Tier-context drill-in: for any rookie, show distribution of historical comparables in their KTC-rookie-tier — what that tier produced and what it built in asset value.
 - No retraining or aggregation in the view. It only loads `projection_model.parquet`.
 
