@@ -49,16 +49,24 @@ Tiers:
 - Rookie: `1.01-1.04` / `1.05-1.08` / `1.09-1.12` / `R2 (2.01-2.12)` / `R3+`.
 - Startup: `Top 12` / `13-36` / `37-72` / `73-150` / `151+`.
 
-Eligibility: rookies who entered the NFL in **2020-2022 inclusive**. KTC daily history covers Y1-Y4 for those cohorts and the 4-year fantasy window is complete. Cohort sizes: roughly 45-60 fantasy-relevant rookies/year × 3 = ~150-180 player rows.
+Eligibility: rookies who entered the NFL in **2020-2025 inclusive**. KTC daily history covers Y1+ for all of these cohorts. Cohorts whose 4-year window is not yet complete are **pro-rated** by K = number of completed seasons:
+  - 2020 → 2020-2023 (K=4, full)
+  - 2021 → 2021-2024 (K=4, full)
+  - 2022 → 2022-2025 (K=4, full)
+  - 2023 → 2023-2025 (K=3, partial)
+  - 2024 → 2024-2025 (K=2, partial)
+  - 2025 → 2025 only (K=1, partial)
+Both the PPG numerator (player points / `K × 17` expected games) and the baseline denominator (mean of positional baselines across the same K seasons) scale with K, so the 0.67 hit-share threshold remains valid for partial-window cohorts. Cohort sizes: ~45-60 fantasy-relevant rookies/year × 6 = ~270-360 player rows.
 
 Positions: QB, RB, WR, TE only.
 
 ### Production Sharpe (win-now framing)
 
-- **Return per player:** 4-year PPG share. Concretely:
-  - **Numerator** = (total fantasy points across the player's Y1-Y4 seasons) / (4 × 17 = 68 expected games). Using expected games rather than games played means injuries and benchings naturally drag the return without needing extra logic.
-  - **Denominator** = positional baseline PPG, computed per-season as the **mean PPG of the startable pool** (QB1-24 / RB1-24 / WR1-36 / TE1-12, matching superflex 12-team starting lineups), then averaged across the player's four seasons (so the baseline tracks the era a given player entered).
-  - **Share** = numerator / denominator. A share of 1.0 means the player produced like a positional starter; 0.5 means half that; 1.5 means top-tier.
+- **Return per player:** position-adjusted PPG share over the K completed seasons of the rookie window (K = min(4, completed seasons)).
+  - **Numerator** = (total fantasy points across the player's first K seasons) / (K × 17 expected games). Using expected games rather than games played means injuries and benchings naturally drag the return without needing extra logic.
+  - **Denominator** = positional baseline PPG, computed per-season as the **mean PPG of the startable pool** (QB1-24 / RB1-24 / WR1-36 / TE1-12, matching superflex 12-team starting lineups), then averaged across the player's K seasons (so the baseline tracks the era a given player entered).
+  - **Share** = numerator / denominator. A share of 1.0 means the player produced like a positional starter over the seasons we have for them; 0.5 means half that; 1.5 means top-tier.
+  - **Pro-rating note:** because both numerator and denominator average over the same K seasons, partial-window cohorts (2023-2025) are directly comparable to full-window cohorts (2020-2022) in share-space. The hit threshold of 0.67 applies uniformly.
 - **Replacement:** PPG share of QB24 / RB24 / WR36 / TE12 (superflex starting baselines for a 12-team league), measured per-season then averaged across the player's rookie window.
 - **Hit:** player's PPG share ≥ 0.67 (direct port of the original 67%-of-baseline rule).
 - **Risk:** sd of player return within `(position × tier)` bucket.
@@ -67,8 +75,8 @@ Positions: QB, RB, WR, TE only.
 
 ### Asset Sharpe (rebuild framing)
 
-- **Return per player:** **peak KTC superflex value** observed during Y1-Y4 of the player's rookie window. End-of-Y4 KTC reported as a secondary stat for reference.
-- **Replacement:** KTC value of QB24 / RB24 / WR36 / TE12 in the matching season, averaged across the player's window.
+- **Return per player:** **peak KTC superflex value** observed during the K completed seasons of the rookie window. Peak is an extremum, so no pro-rating math is needed — partial-window cohorts simply have less observation time, which means their peaks may understate eventual outcomes (a known caveat). End-of-window KTC reported as a secondary stat for reference.
+- **Replacement:** KTC value of QB24 / RB24 / WR36 / TE12 in the matching season, averaged across the K seasons the player has so far.
 - **Hit:** player's peak KTC ≥ replacement KTC × 1.0 — i.e., they at some point became a tradeable startable-tier asset.
 - **Risk:** sd of peak KTC within `(position × tier)` bucket.
 - **Sharpe formulas:** same shapes as Production, in KTC value units.

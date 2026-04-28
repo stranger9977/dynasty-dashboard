@@ -851,18 +851,17 @@ git commit -m "feat(fantasy_sharpe): draft picks and NGS combine loaders"
 Create `analysis/fantasy_sharpe/tests/testthat/test-sharpe-compute.R`:
 
 ```r
-test_that("compute_player_production_share gives the expected share for a synthetic cohort", {
+test_that("compute_player_production_share computes a full-window share correctly", {
   source(here::here("analysis/fantasy_sharpe/R/constants.R"))
   source(here::here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
 
-  # Player A: 1000 PPR over 4 seasons, 17 games each season expected.
-  # Total PPG = 1000 / (4 * 17) = 14.71.
-  # If positional baseline averaged across the 4 seasons is 14.71, share = 1.0.
+  # Player A: 1000 half-PPR over 4 seasons, 17 games expected each.
+  # Total PPG = 1000 / (4 * 17) = 14.71. Baseline 14.71 -> share = 1.0.
   player_seasons <- tibble::tibble(
     player_id = "A",
     season = 2020:2023,
     position = "WR",
-    fantasy_points_half = c(250, 250, 250, 250),  # 1000 total
+    fantasy_points_half = c(250, 250, 250, 250),
     games = c(17, 17, 17, 17)
   )
   baseline <- tibble::tibble(
@@ -872,10 +871,58 @@ test_that("compute_player_production_share gives the expected share for a synthe
 
   share <- compute_player_production_share(player_seasons, baseline,
                                            scoring = "half",
-                                           rookie_year = 2020)
+                                           rookie_year = 2020,
+                                           last_complete_season = 2025L)
+  expect_equal(share$K, 4L)
   expect_equal(share$ppg_share, 1.0, tolerance = 0.01)
   expect_equal(share$replacement_share, 10.0 / 14.71, tolerance = 0.01)
-  expect_true(share$is_hit)  # 1.0 >= 0.67
+  expect_true(share$is_hit)
+})
+
+test_that("compute_player_production_share pro-rates partial-window cohorts (K < 4)", {
+  source(here::here("analysis/fantasy_sharpe/R/constants.R"))
+  source(here::here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
+
+  # 2024 rookie: K = 2 (2024 + 2025). 500 half-PPR over 2 seasons of 17 games each.
+  # Total PPG = 500 / (2 * 17) = 14.71. Baseline 14.71 -> share = 1.0.
+  player_seasons <- tibble::tibble(
+    player_id = "B",
+    season = 2024:2025,
+    position = "RB",
+    fantasy_points_half = c(250, 250),
+    games = c(17, 17)
+  )
+  baseline <- tibble::tibble(
+    season = c(2024, 2025), position = c("RB", "RB"),
+    baseline_ppg = c(14.71, 14.71), replacement_ppg = c(10.0, 10.0)
+  )
+
+  share <- compute_player_production_share(player_seasons, baseline,
+                                           scoring = "half",
+                                           rookie_year = 2024,
+                                           last_complete_season = 2025L)
+  expect_equal(share$K, 2L)
+  expect_equal(share$ppg_share, 1.0, tolerance = 0.01)
+  expect_true(share$is_hit)
+})
+
+test_that("compute_player_production_share returns NA share when K = 0", {
+  source(here::here("analysis/fantasy_sharpe/R/constants.R"))
+  source(here::here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
+
+  player_seasons <- tibble::tibble(
+    player_id = "C", season = integer(), position = character(),
+    fantasy_points_half = numeric(), games = integer()
+  )
+  baseline <- tibble::tibble(season = integer(), position = character(),
+                             baseline_ppg = numeric(), replacement_ppg = numeric())
+
+  share <- compute_player_production_share(player_seasons, baseline,
+                                           scoring = "half",
+                                           rookie_year = 2026L,
+                                           last_complete_season = 2025L)
+  expect_equal(share$K, 0L)
+  expect_true(is.na(share$ppg_share))
 })
 
 test_that("tier_production_sharpe returns one row per (position, tier)", {
@@ -933,24 +980,45 @@ suppressPackageStartupMessages({
 })
 source(here::here("analysis/fantasy_sharpe/R/constants.R"))
 
-# For one player (one row per season in their rookie window): compute the 4-year
-# PPG share, the season-averaged replacement share, and the hit flag.
+# For one player (one row per season in their rookie window): compute the
+# K-aware PPG share, the season-averaged replacement share, and the hit flag.
+# K = number of completed seasons (capped at ROOKIE_WINDOW_YEARS).
+# Both numerator and denominator scale with K so that partial-window cohorts
+# stay comparable in share-space to full-window cohorts.
 compute_player_production_share <- function(player_seasons, baseline_df,
                                             scoring = c("half", "ppr", "std"),
-                                            rookie_year) {
+                                            rookie_year,
+                                            last_complete_season = LAST_COMPLETE_SEASON) {
   scoring <- match.arg(scoring)
   pts_col <- paste0("fantasy_points_", scoring)
 
+  K <- completed_window_years(rookie_year, last_complete_season)
+
+  if (K == 0L) {
+    return(tibble::tibble(
+      player_id = if (nrow(player_seasons)) unique(player_seasons$player_id) else NA_character_,
+      position  = if (nrow(player_seasons)) unique(player_seasons$position)  else NA_character_,
+      rookie_year = as.integer(rookie_year),
+      K = 0L,
+      player_ppg = NA_real_,
+      baseline_ppg = NA_real_,
+      replacement_ppg = NA_real_,
+      ppg_share = NA_real_,
+      replacement_share = NA_real_,
+      is_hit = NA
+    ))
+  }
+
+  window_end <- rookie_year + K - 1L
   player_seasons <- player_seasons |>
-    dplyr::filter(season >= rookie_year, season < rookie_year + ROOKIE_WINDOW_YEARS)
+    dplyr::filter(season >= rookie_year, season <= window_end)
 
   total_pts <- sum(player_seasons[[pts_col]], na.rm = TRUE)
-  expected_games <- ROOKIE_WINDOW_YEARS * EXPECTED_GAMES_PER_SEASON
+  expected_games <- K * EXPECTED_GAMES_PER_SEASON
   player_ppg <- total_pts / expected_games
 
   bl_window <- baseline_df |>
-    dplyr::filter(season >= rookie_year,
-                  season < rookie_year + ROOKIE_WINDOW_YEARS,
+    dplyr::filter(season >= rookie_year, season <= window_end,
                   position == unique(player_seasons$position))
 
   baseline_avg <- mean(bl_window$baseline_ppg, na.rm = TRUE)
@@ -962,7 +1030,8 @@ compute_player_production_share <- function(player_seasons, baseline_df,
   tibble::tibble(
     player_id = unique(player_seasons$player_id),
     position = unique(player_seasons$position),
-    rookie_year = rookie_year,
+    rookie_year = as.integer(rookie_year),
+    K = as.integer(K),
     player_ppg = player_ppg,
     baseline_ppg = baseline_avg,
     replacement_ppg = replacement_avg,
@@ -1024,23 +1093,46 @@ git commit -m "feat(fantasy_sharpe): production Sharpe (player + tier)"
 Append to `test-sharpe-compute.R`:
 
 ```r
-test_that("compute_player_asset_value finds peak KTC during rookie window", {
+test_that("compute_player_asset_value finds peak KTC during full rookie window", {
+  source(here::here("analysis/fantasy_sharpe/R/constants.R"))
   source(here::here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
   hist <- tibble::tribble(
     ~ktc_id, ~date,                 ~value,
     77,      as.Date("2020-09-15"), 5000,
     77,      as.Date("2021-12-01"), 8000,
-    77,      as.Date("2023-08-20"), 9500,  # peak inside window
-    77,      as.Date("2024-01-10"), 7000,
-    77,      as.Date("2025-06-01"), 6000   # outside 4-year window starting 2020
+    77,      as.Date("2023-08-20"), 9500,  # peak inside K=4 window for 2020 rookie
+    77,      as.Date("2024-01-10"), 7000,  # also inside the window (Aug 2023 - Aug 2024)
+    77,      as.Date("2025-06-01"), 6000   # outside K=4 window starting 2020
   )
   result <- compute_player_asset_value(
     history = hist, ktc_id = 77, rookie_year = 2020,
-    replacement_ktc_by_season = tibble::tibble(season = 2020:2023, replacement_ktc = 4000)
+    replacement_ktc_by_season = tibble::tibble(season = 2020:2023, replacement_ktc = 4000),
+    last_complete_season = 2025L
   )
+  expect_equal(result$K, 4L)
   expect_equal(result$peak_ktc, 9500)
   expect_equal(result$replacement_ktc, 4000)
-  expect_true(result$is_asset_hit)  # 9500 >= 4000
+  expect_true(result$is_asset_hit)
+})
+
+test_that("compute_player_asset_value pro-rates window for partial-window cohorts", {
+  source(here::here("analysis/fantasy_sharpe/R/constants.R"))
+  source(here::here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
+  # 2024 rookie, K = 2 (2024-09-01 -> 2025-08-31). Peak inside window is 7000;
+  # the 9500 from 2023 is BEFORE the window (player wasn't in the league yet).
+  hist <- tibble::tribble(
+    ~ktc_id, ~date,                 ~value,
+    88,      as.Date("2023-08-20"), 9500,  # before window
+    88,      as.Date("2024-09-15"), 6000,  # inside window
+    88,      as.Date("2025-03-01"), 7000   # inside window — peak
+  )
+  result <- compute_player_asset_value(
+    history = hist, ktc_id = 88, rookie_year = 2024,
+    replacement_ktc_by_season = tibble::tibble(season = 2024:2025, replacement_ktc = 4000),
+    last_complete_season = 2025L
+  )
+  expect_equal(result$K, 2L)
+  expect_equal(result$peak_ktc, 7000)
 })
 
 test_that("tier_asset_sharpe formula", {
@@ -1074,23 +1166,35 @@ Append to `analysis/fantasy_sharpe/R/sharpe_compute.R`:
 
 ```r
 compute_player_asset_value <- function(history, ktc_id, rookie_year,
-                                       replacement_ktc_by_season) {
+                                       replacement_ktc_by_season,
+                                       last_complete_season = LAST_COMPLETE_SEASON) {
+  K <- completed_window_years(rookie_year, last_complete_season)
+
+  if (K == 0L) {
+    return(tibble::tibble(
+      ktc_id = ktc_id, rookie_year = as.integer(rookie_year), K = 0L,
+      peak_ktc = NA_real_, replacement_ktc = NA_real_, is_asset_hit = NA
+    ))
+  }
+
+  # Window: Sept 1 of rookie_year through Aug 31 of (rookie_year + K - 1).
   start_date <- as.Date(sprintf("%d-09-01", rookie_year))
-  end_date   <- as.Date(sprintf("%d-08-31", rookie_year + ROOKIE_WINDOW_YEARS - 1))
+  end_date   <- as.Date(sprintf("%d-08-31", rookie_year + K))
 
   peak <- history |>
     dplyr::filter(ktc_id == !!ktc_id, date >= start_date, date <= end_date) |>
     dplyr::pull(value) |>
-    (\(x) if (length(x) == 0) NA_integer_ else max(x, na.rm = TRUE))()
+    (\(x) if (length(x) == 0) NA_real_ else max(x, na.rm = TRUE))()
 
   replacement <- replacement_ktc_by_season |>
-    dplyr::filter(season >= rookie_year, season < rookie_year + ROOKIE_WINDOW_YEARS) |>
+    dplyr::filter(season >= rookie_year, season <= rookie_year + K - 1L) |>
     dplyr::pull(replacement_ktc) |>
     mean(na.rm = TRUE)
 
   tibble::tibble(
     ktc_id = ktc_id,
-    rookie_year = rookie_year,
+    rookie_year = as.integer(rookie_year),
+    K = as.integer(K),
     peak_ktc = peak,
     replacement_ktc = replacement,
     is_asset_hit = !is.na(peak) & peak >= replacement
@@ -1167,8 +1271,11 @@ source(here("analysis/fantasy_sharpe/R/sharpe_compute.R"))
 
 cat("[fantasy_sharpe] Loading inputs...\n")
 
-# Fantasy points across all seasons we need (rookie window for the latest cohort).
-all_seasons <- min(ELIGIBILITY_COHORTS):(max(ELIGIBILITY_COHORTS) + ROOKIE_WINDOW_YEARS - 1)
+# Fantasy points across all completed seasons relevant to any cohort window,
+# capped at the most recent COMPLETED fantasy season (so we don't try to query
+# the in-progress / not-yet-started season).
+window_end_max <- min(max(ELIGIBILITY_COHORTS) + ROOKIE_WINDOW_YEARS - 1, LAST_COMPLETE_SEASON)
+all_seasons <- min(ELIGIBILITY_COHORTS):window_end_max
 fp <- load_fantasy_points(seasons = all_seasons)
 baseline <- compute_positional_baseline(fp, scoring = "half")
 
