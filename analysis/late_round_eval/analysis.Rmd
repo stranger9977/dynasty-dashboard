@@ -1,0 +1,328 @@
+---
+title: "Late Round Prospect Guide — Evaluation 2022–2025"
+author: "Nick Gurol"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+knit: (function(input, ...) rmarkdown::render(input, output_dir = dirname(input), ...))
+---
+
+```{css mobile-styles, echo=FALSE}
+img { max-width: 100%; height: auto; }
+.main-container { max-width: 1000px; }
+table { display: block; overflow-x: auto; }
+@media (max-width: 768px) {
+  .main-container { max-width: 100% !important; padding: 8px !important; }
+  table { font-size: 11px !important; }
+  h1 { font-size: 1.5em; } h2 { font-size: 1.25em; } h3 { font-size: 1.1em; }
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 9, fig.height = 5, dpi = 120)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(arrow)
+  library(knitr)
+  library(jsonlite)
+})
+
+# Resolve repo root robustly. Three strategies, in order:
+#   1) rstudioapi (only works inside RStudio)
+#   2) knitr current input path (set when knitting)
+#   3) getwd() fallback — assumes we're somewhere inside the repo
+find_repo_root <- function() {
+  candidates <- character(0)
+
+  rs_path <- tryCatch(
+    rstudioapi::getActiveDocumentContext()$path,
+    error = function(e) NULL
+  )
+  if (!is.null(rs_path) && nzchar(rs_path)) {
+    candidates <- c(candidates, normalizePath(file.path(dirname(rs_path), "..", ".."),
+                                              mustWork = FALSE))
+  }
+
+  knit_input <- tryCatch(knitr::current_input(dir = TRUE), error = function(e) NULL)
+  if (!is.null(knit_input) && nzchar(knit_input)) {
+    candidates <- c(candidates, normalizePath(file.path(dirname(knit_input), "..", ".."),
+                                              mustWork = FALSE))
+  }
+
+  # If knitting, working dir is the Rmd dir → ../.. is repo root.
+  candidates <- c(candidates, normalizePath(file.path(getwd(), "..", ".."), mustWork = FALSE))
+  # If working dir is already repo root.
+  candidates <- c(candidates, normalizePath(getwd(), mustWork = FALSE))
+
+  marker <- "analysis/late_round_eval/data/eval_df.parquet"
+  for (cand in candidates) {
+    if (file.exists(file.path(cand, marker))) return(cand)
+  }
+  # Last resort: return first candidate even if marker missing
+  candidates[1]
+}
+
+repo_root <- find_repo_root()
+# Make repo_root visible to later chunks (knitr resets cwd between chunks)
+knitr::opts_knit$set(root.dir = repo_root)
+setwd(repo_root)
+
+# Absolute paths so later chunks don't depend on cwd
+abs_path <- function(rel) file.path(repo_root, rel)
+
+source(abs_path("analysis/late_round_eval/data_pipeline.R"), local = TRUE)
+source(abs_path("analysis/late_round_eval/models.R"), local = TRUE)
+source(abs_path("analysis/late_round_eval/charts.R"), local = TRUE)
+
+# Re-anchor chart output dir to absolute path (charts.R sets a relative CHART_DIR)
+CHART_DIR <- abs_path("analysis/late_round_eval/charts")
+dir.create(CHART_DIR, recursive = TRUE, showWarnings = FALSE)
+
+eval_df <- read_parquet(abs_path("analysis/late_round_eval/data/eval_df.parquet"))
+harmonized_all <- read_parquet(abs_path("analysis/late_round_eval/extraction/output/harmonized.parquet"))
+models_out <- run_per_position_models(eval_df)
+
+fmt <- function(x, d = 2) ifelse(is.na(x), "—", sprintf(paste0("%.", d, "f"), x))
+```
+
+# Executive summary
+
+```{r exec-summary}
+wr_reg <- models_out$WR$regression$metrics
+rb_reg <- models_out$RB$regression$metrics
+wr_clf <- models_out$WR$classification$metrics
+rb_clf <- models_out$RB$classification$metrics
+
+tibble::tibble(
+  Position = c("WR", "RB"),
+  N        = c(wr_reg$n, rb_reg$n),
+  `Baseline adj R²` = c(fmt(wr_reg$adj_r2_baseline), fmt(rb_reg$adj_r2_baseline)),
+  `Guide adj R²`    = c(fmt(wr_reg$adj_r2_guide), fmt(rb_reg$adj_r2_guide)),
+  `ΔR²`             = c(fmt(wr_reg$delta_r2), fmt(rb_reg$delta_r2)),
+  `F-test p`        = c(fmt(wr_reg$f_test_p, 3), fmt(rb_reg$f_test_p, 3)),
+  `Baseline κ`      = c(fmt(wr_clf$kappa_baseline), fmt(rb_clf$kappa_baseline)),
+  `Macro AUC base`  = c(fmt(wr_clf$macro_auc_baseline), fmt(rb_clf$macro_auc_baseline)),
+  `Macro AUC guide` = c(fmt(wr_clf$macro_auc_guide), fmt(rb_clf$macro_auc_guide))
+) |> kable()
+```
+
+**Headline:** Across 2022–2025 rookie classes (WR n=`r wr_reg$n`, RB n=`r rb_reg$n`), the Late Round Prospect Guide's canonical tier `r if (wr_reg$delta_r2 > 0.02 || rb_reg$delta_r2 > 0.02) "adds modest signal over an age + log(draft_pick) baseline." else "does NOT add statistically significant signal over an age + log(draft_pick) baseline — his tier correlates with production, but that correlation is already captured by NFL draft capital."`
+
+**Verdict (WR):** `r if (wr_reg$delta_r2 > 0.05) "His tier adds material signal over draft capital + age." else if (wr_reg$delta_r2 > 0) "His tier adds marginal signal." else "His tier adds no signal beyond draft capital + age."`
+
+**Verdict (RB):** `r if (rb_reg$delta_r2 > 0.05) "His tier adds material signal over draft capital + age." else if (rb_reg$delta_r2 > 0) "His tier adds marginal signal." else "His tier adds no signal beyond draft capital + age."`
+
+# Methodology evolution 2022–2025
+
+The guide evolved markedly across the four years studied.
+
+- **2022–2024 (Z-Prospect Model):** Numeric tiers 1–15 (2022, 2023) or 1–12 (2024) drawn directly from the post-draft rookie rankings cheatsheet. No verbal tier semantics beyond ordinal position.
+- **2025–2026 (ZAP Model):** Verbal tiers (Elite Producer → Dart Throw, plus a 2026-only Legendary Performer top tier). Each tier carries a production claim (e.g., "Weekly Starter — should provide stability in your starting lineup, think RB2/WR2").
+
+```{r methodology-features}
+years <- 2022:2025
+feature_rows <- lapply(years, function(y) {
+  mp <- abs_path(file.path("analysis/late_round_eval/extraction/output", paste0(y, "_metadata.json")))
+  if (!file.exists(mp)) return(NULL)
+  m <- jsonlite::fromJSON(mp)
+  feats <- m$features_mentioned
+  if (is.null(feats)) return(NULL)
+  tibble(year = y, feature = as.character(feats))
+}) |> bind_rows()
+
+if (nrow(feature_rows) > 0) {
+  feature_table <- feature_rows |>
+    mutate(present = "✓") |>
+    pivot_wider(names_from = year, values_from = present, values_fill = "·")
+  kable(feature_table, caption = "Features mentioned in methodology, by year")
+}
+```
+
+# Coverage 2022–2026
+
+```{r coverage}
+chart_coverage(eval_df, harmonized_all)
+```
+
+```{r coverage-table}
+harmonized_all |>
+  dplyr::filter(position %in% c("WR", "RB")) |>
+  count(guide_year, position) |>
+  pivot_wider(names_from = position, values_from = n, values_fill = 0) |>
+  kable(caption = "WR + RB players per guide year")
+```
+
+**Note on 2026:** the 2026 class was extracted and harmonized but is excluded from all eval metrics. Player birthdates aren't yet in nflreadr for these rookies, and even if matched, they have no NFL season data yet.
+
+# Production by tier — what does each label actually mean?
+
+Each canonical tier maps to verbal descriptors with production claims (especially in 2025–2026). Here are the realized outcomes.
+
+```{r production-by-tier}
+chart_production_by_tier(eval_df)
+```
+
+```{r tier-stats}
+eval_df |>
+  group_by(position, canonical_tier) |>
+  summarise(n = n(),
+            mean_ffppg = mean(best_ffppg, na.rm = TRUE),
+            median_ffppg = median(best_ffppg, na.rm = TRUE),
+            hit_rate = mean(hit_flag),
+            elite_rate = mean(elite_flag),
+            bust_rate = mean(bust_flag),
+            .groups = "drop") |>
+  arrange(position, desc(canonical_tier)) |>
+  mutate(across(c(mean_ffppg, median_ffppg), ~ round(.x, 2)),
+         across(c(hit_rate, elite_rate, bust_rate), ~ scales::percent(.x, accuracy = 1))) |>
+  kable(caption = "Realized production by canonical tier and position. Hit ≥10 PPR/g, Elite ≥15, Bust <5.")
+```
+
+Tier ordering is monotonic on mean FFPPG for both positions, except WR Elite and Starter are statistically flat (the small WR Elite n=`r sum(eval_df$position=="WR" & eval_df$canonical_tier=="Elite")` means a single Puka Nacua–scale outlier could flip the order).
+
+# Regression — does his tier add over draft capital + age?
+
+```{r reg-coefs, results='asis'}
+for (pos in c("WR", "RB")) {
+  cat(sprintf("\n## %s\n\n", pos))
+  m <- models_out[[pos]]$regression$guide
+  print(broom::tidy(m) |>
+          mutate(across(where(is.numeric), ~ round(.x, 3))) |>
+          kable())
+}
+```
+
+# Classification — confusion matrices and AUC
+
+```{r confusion-wr}
+chart_confusion_matrix(models_out$WR$classification$confusion_baseline,
+                       "WR baseline ordinal logistic confusion (true vs predicted)")
+```
+
+```{r confusion-rb}
+chart_confusion_matrix(models_out$RB$classification$confusion_baseline,
+                       "RB baseline ordinal logistic confusion (true vs predicted)")
+```
+
+```{r threshold-auc}
+tibble::tibble(
+  Position = c("WR", "RB"),
+  `Hit AUC (baseline FFPPG pred)` = c(
+    fmt(models_out$WR$threshold_auc_baseline$auc_hit),
+    fmt(models_out$RB$threshold_auc_baseline$auc_hit)
+  ),
+  `Hit AUC (guide tier as ordinal)` = c(
+    fmt(models_out$WR$threshold_auc_guide$auc_hit),
+    fmt(models_out$RB$threshold_auc_guide$auc_hit)
+  ),
+  `Elite AUC (baseline)` = c(
+    fmt(models_out$WR$threshold_auc_baseline$auc_elite),
+    fmt(models_out$RB$threshold_auc_baseline$auc_elite)
+  ),
+  `Elite AUC (guide)` = c(
+    fmt(models_out$WR$threshold_auc_guide$auc_elite),
+    fmt(models_out$RB$threshold_auc_guide$auc_elite)
+  )
+) |> kable(caption = "Production-threshold AUC. Baseline = continuous lm prediction of best_ffppg. Guide = his canonical_tier treated as ordinal 1–5 score.")
+```
+
+# Slices — where (if anywhere) does he add value?
+
+```{r slice-heatmap}
+chart_slice_heatmap(eval_df)
+```
+
+```{r slice-table}
+eval_df |>
+  group_by(position, draft_round, p5_flag) |>
+  summarise(n = n(), mean_ffppg = mean(best_ffppg, na.rm = TRUE),
+            hit_rate = mean(hit_flag), .groups = "drop") |>
+  mutate(mean_ffppg = round(mean_ffppg, 2),
+         hit_rate = scales::percent(hit_rate, accuracy = 1)) |>
+  kable(caption = "Production by position × draft round × P5")
+```
+
+# Sleeper detection — day-3 + UDFA
+
+The sleeper-detection slice is where his tier might still add value: when NFL draft capital is uninformative (everyone has roughly the same low pick number), can his ZAP score / tier separate hits from busts?
+
+```{r lift}
+chart_lift_curve(eval_df)
+```
+
+```{r late-named-examples}
+eval_df |>
+  dplyr::filter(draft_round %in% c("day-3", "UDFA")) |>
+  arrange(desc(best_ffppg)) |>
+  head(10) |>
+  dplyr::select(name, position, guide_year, canonical_tier, draft_round, best_ffppg) |>
+  mutate(best_ffppg = round(best_ffppg, 2)) |>
+  kable(caption = "Top 10 day-3+UDFA hits, with his tier call")
+
+late_misses <- eval_df |>
+  dplyr::filter(draft_round %in% c("day-3", "UDFA"),
+                canonical_tier %in% c("Starter", "Elite"),
+                best_ffppg < 5)
+if (nrow(late_misses) > 0) {
+  late_misses |>
+    arrange(canonical_tier, best_ffppg) |>
+    head(10) |>
+    dplyr::select(name, position, guide_year, canonical_tier, draft_round, best_ffppg) |>
+    mutate(best_ffppg = round(best_ffppg, 2)) |>
+    kable(caption = "Late-round Starter+ calls that didn't pan out (best FFPPG <5)")
+} else {
+  cat("No late-round Starter+ calls busted in the eval window.")
+}
+```
+
+# Year-by-year scorecard
+
+```{r yearly, results='asis'}
+for (y in 2022:2025) {
+  cat(sprintf("\n## %d class\n\n", y))
+  print(
+    eval_df |>
+      dplyr::filter(guide_year == y) |>
+      arrange(desc(as.integer(canonical_tier)), draft_pick) |>
+      dplyr::select(name, position, canonical_tier, draft_round, best_ffppg) |>
+      mutate(best_ffppg = round(best_ffppg, 2)) |>
+      kable()
+  )
+}
+```
+
+# Sensitivity appendix
+
+```{r sensitivity}
+wr_df <- eval_df |> dplyr::filter(position == "WR")
+rb_df <- eval_df |> dplyr::filter(position == "RB")
+
+wr_yearfe_b <- lm(best_ffppg ~ age + log(draft_pick) + factor(guide_year), data = wr_df)
+wr_yearfe_g <- lm(best_ffppg ~ age + log(draft_pick) + factor(guide_year) + canonical_tier, data = wr_df)
+rb_yearfe_b <- lm(best_ffppg ~ age + log(draft_pick) + factor(guide_year), data = rb_df)
+rb_yearfe_g <- lm(best_ffppg ~ age + log(draft_pick) + factor(guide_year) + canonical_tier, data = rb_df)
+
+tibble::tibble(
+  Position = c("WR", "RB"),
+  `ΔR² (no year FE)` = c(fmt(models_out$WR$regression$metrics$delta_r2),
+                          fmt(models_out$RB$regression$metrics$delta_r2)),
+  `ΔR² (with year FE)` = c(
+    fmt(summary(wr_yearfe_g)$adj.r.squared - summary(wr_yearfe_b)$adj.r.squared),
+    fmt(summary(rb_yearfe_g)$adj.r.squared - summary(rb_yearfe_b)$adj.r.squared)
+  )
+) |> kable(caption = "Sensitivity: effect of including year fixed effects")
+```
+
+### Match funnel summary
+
+```{r match-funnel}
+matches <- read_parquet(abs_path("analysis/late_round_eval/extraction/output/matches.parquet"))
+matches |> count(match_stage) |> kable()
+```
+
+---
+
+*Built with the late round prospect guide evaluation pipeline. Spec: `docs/superpowers/specs/2026-05-16-late-round-eval-design.md`. Plan: `docs/superpowers/plans/2026-05-16-late-round-eval.md`.*
