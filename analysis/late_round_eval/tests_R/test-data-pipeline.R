@@ -38,11 +38,13 @@ test_that("classify_draft_round buckets correctly", {
 })
 
 test_that("p5_flag handles realignment", {
-  expect_true(p5_flag("Georgia", 2023))
-  expect_true(p5_flag("Oregon", 2023))     # Pac-12 in 2023
-  expect_false(p5_flag("Oregon", 2024))    # Pac-12 collapsed
-  expect_true(p5_flag("Notre Dame", 2024))
-  expect_false(p5_flag("Appalachian State", 2024))
+  expect_true(p5_flag("Georgia", 2023))            # SEC, always P5
+  expect_true(p5_flag("Oregon", 2023))             # was Pac-12, P5
+  expect_true(p5_flag("Oregon", 2024))             # moved to Big Ten, still P5
+  expect_false(p5_flag("Oregon State", 2024))      # stranded in rump Pac-12
+  expect_false(p5_flag("Washington State", 2024))  # stranded in rump Pac-12
+  expect_true(p5_flag("Notre Dame", 2024))         # independent, treated as P5
+  expect_false(p5_flag("Appalachian State", 2024)) # Sun Belt, never P5
 })
 
 test_that("compute_best_ffppg picks max season FFPPG in Y1-Y3", {

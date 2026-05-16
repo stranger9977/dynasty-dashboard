@@ -90,12 +90,11 @@ COLLEGE_CONFERENCE <- tibble::tribble(
   "Maryland",         "Big Ten",
   "Rutgers",          "Big Ten",
   "Northwestern",     "Big Ten",
-  # Former Pac-12 schools — tracked by historical conference so that
-  # year-keyed P5 sets correctly flag them non-P5 after the 2024 collapse.
-  "USC",              "Pac-12",
-  "UCLA",             "Pac-12",
-  "Oregon",           "Pac-12",
-  "Washington",       "Pac-12",
+  # Pac-12 schools that moved to Big Ten in 2024 (still P5).
+  "USC",              "Big Ten",
+  "UCLA",             "Big Ten",
+  "Oregon",           "Big Ten",
+  "Washington",       "Big Ten",
   "Oklahoma State",   "Big 12",
   "Kansas",           "Big 12",
   "Kansas State",     "Big 12",
@@ -108,12 +107,11 @@ COLLEGE_CONFERENCE <- tibble::tribble(
   "Cincinnati",       "Big 12",
   "Houston",          "Big 12",
   "UCF",              "Big 12",
-  # Former Pac-12 schools that moved to Big 12 in 2024 — tracked as Pac-12
-  # so they correctly flag non-P5 after the collapse.
-  "Arizona",          "Pac-12",
-  "Arizona State",    "Pac-12",
-  "Colorado",         "Pac-12",
-  "Utah",             "Pac-12",
+  # Pac-12 schools that moved to Big 12 in 2024 (still P5).
+  "Arizona",          "Big 12",
+  "Arizona State",    "Big 12",
+  "Colorado",         "Big 12",
+  "Utah",             "Big 12",
   "Clemson",          "ACC",
   "Florida State",    "ACC",
   "Miami",            "ACC",
@@ -128,11 +126,15 @@ COLLEGE_CONFERENCE <- tibble::tribble(
   "Boston College",   "ACC",
   "Syracuse",         "ACC",
   "Georgia Tech",     "ACC",
-  # Former Pac-12 schools that moved to ACC in 2024 — tracked as Pac-12
-  # so they correctly flag non-P5 after the collapse. SMU was AAC.
-  "California",       "Pac-12",
-  "Stanford",         "Pac-12",
-  "SMU",              "AAC",
+  # Pac-12 schools that moved to ACC in 2024 (still P5).
+  "California",       "ACC",
+  "Stanford",         "ACC",
+  # SMU was AAC pre-2024, ACC from 2024+. Mapped to ACC (current); this
+  # slightly over-credits pre-2024 SMU products, but P5/non-P5 is a coarse
+  # marker and current-conference is the simplest defensible model.
+  "SMU",              "ACC",
+  # Oregon State and Washington State stayed in the rump Pac-12 and lost
+  # P5 status from 2024 onward.
   "Oregon State",     "Pac-12",
   "Washington State", "Pac-12",
   "Notre Dame",       "Independent" # always treat as P5
