@@ -7,8 +7,13 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
     "markitdown>=0.1.5",
+    "matplotlib>=3.10.9",
+    "meteostat>=2.1.4",
+    "networkx>=3.6.1",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
+    "pydantic>=2.0",
+    "rapidfuzz>=3.0",
     "requests>=2.33.0",
     "streamlit>=1.55.0",
 ]
