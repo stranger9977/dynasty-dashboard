@@ -6,6 +6,25 @@ from analysis.late_round_eval.extraction.orchestrate import (
 )
 
 
+def test_load_and_validate_truncates_long_blurb(tmp_path):
+    # Subagents sometimes return blurbs >500 chars; orchestrator should
+    # truncate to 500 rather than drop the row.
+    players = [{
+        "guide_year": 2024, "name": "Long Blurb", "position": "WR",
+        "original_tier_label": "Starter", "original_tier_rank": 1,
+        "overall_rank": 1, "college": "Georgia",
+        "blurb": "x" * 800,  # exceeds 500
+        "source_page": 1, "source_quote": "Long Blurb WR",
+    }]
+    players_path = tmp_path / "players.json"
+    players_path.write_text(json.dumps(players))
+
+    valid, dropped = load_and_validate_extraction(str(players_path))
+    assert len(valid) == 1
+    assert len(valid[0]["blurb"]) == 500
+    assert len(dropped) == 0
+
+
 def test_load_and_validate_drops_invalid_rows(tmp_path):
     players = [
         {

@@ -18,6 +18,11 @@ def load_and_validate_extraction(players_path: str) -> tuple[list[dict], list[di
     valid: list[dict] = []
     dropped: list[dict] = []
     for row in raw:
+        # Pre-truncate blurb: subagents sometimes return >500 chars despite the
+        # prompt instruction. The 500-char convention is downstream-friendly,
+        # not a correctness gate, so we enforce it here rather than dropping.
+        if "blurb" in row and isinstance(row["blurb"], str) and len(row["blurb"]) > 500:
+            row = {**row, "blurb": row["blurb"][:500]}
         try:
             GuidePlayer(**row)
             valid.append(row)

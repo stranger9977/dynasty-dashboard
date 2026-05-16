@@ -77,3 +77,36 @@ def test_guide_metadata_valid():
         tier_definitions={"Elite": "Top of the class", "Starter": "Likely producer"},
     )
     assert m.guide_year == 2024
+
+
+def test_guide_player_empty_college_allowed():
+    # Some guides only profile WR/RB; TEs and QBs appear in cheatsheet
+    # without college listed. Schema should accept "".
+    p = GuidePlayer(
+        guide_year=2024,
+        name="Caleb Williams",
+        position="QB",
+        original_tier_label="Tier 1",
+        original_tier_rank=1,
+        college="",
+        blurb="",
+        source_page=137,
+        source_quote="1. Caleb Williams QB",
+    )
+    assert p.college == ""
+
+
+def test_guide_player_null_tier_rank_allowed():
+    # 2022's "Z-Prospect Ranked" synthetic tier has no numeric rank.
+    p = GuidePlayer(
+        guide_year=2022,
+        name="Ty Chandler",
+        position="RB",
+        original_tier_label="Z-Prospect Ranked",
+        original_tier_rank=None,
+        college="North Carolina",
+        blurb="x",
+        source_page=30,
+        source_quote="Ty Chandler RB North Carolina",
+    )
+    assert p.original_tier_rank is None
