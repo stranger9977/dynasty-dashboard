@@ -140,25 +140,87 @@ COLLEGE_CONFERENCE <- tibble::tribble(
   "Notre Dame",       "Independent" # always treat as P5
 )
 
+# Synonyms / abbreviations for schools whose name in the guide differs
+# from the canonical short form used in COLLEGE_CONFERENCE.
+COLLEGE_SYNONYMS <- c(
+  "southern california" = "USC",
+  "louisiana state"     = "LSU",
+  "texas christian"     = "TCU",
+  "southern methodist"  = "SMU",
+  "brigham young"       = "BYU",
+  "ole miss"            = "Mississippi",
+  "miami fl"            = "Miami",
+  "miami florida"       = "Miami",
+  "central florida"     = "UCF",
+  "north carolina state"= "NC State",
+  "alabama birmingham"  = "UAB"
+)
+
+# Common mascot tokens that appear after the school name in some guide
+# extractions (e.g., "Alabama Crimson Tide"). Stripped before lookup.
+.MASCOT_TOKENS <- c(
+  "Crimson Tide", "Bulldogs", "Tigers", "Wildcats", "Buckeyes", "Wolverines",
+  "Gators", "Razorbacks",
+  "Nittany Lions", "Badgers", "Hawkeyes", "Gophers", "Fighting Illini",
+  "Illini", "Hoosiers", "Boilermakers", "Spartans", "Cornhuskers",
+  "Terrapins", "Scarlet Knights", "Trojans", "Bruins", "Ducks", "Huskies",
+  "Beavers", "Cougars", "Sun Devils", "Buffaloes", "Utes", "Cardinal",
+  "Razorbacks", "Volunteers", "Commodores", "Rebels", "Gamecocks",
+  "Aggies", "Longhorns", "Sooners", "Cyclones", "Jayhawks", "Mountaineers",
+  "Bearcats", "Red Raiders", "Horned Frogs", "Knights", "Mustangs",
+  "Buffaloes", "Demon Deacons", "Cavaliers", "Hokies", "Tar Heels",
+  "Yellow Jackets", "Hurricanes", "Orange", "Eagles", "Panthers",
+  "Seminoles", "Cardinals", "Fighting Irish", "Bears", "Owls", "Broncos",
+  "Mustangs", "Aztecs", "Lobos", "Falcons", "Rebels", "Mean Green",
+  "Roadrunners", "Pirates", "Chanticleers", "Thundering Herd",
+  "Green Wave", "Mocs", "Bison", "Jackrabbits", "Pioneers",
+  "Hilltoppers", "Hilltoppers", "Coyotes", "Hatters", "Argonauts",
+  "Catamounts", "Crusaders", "Hawks", "Spiders", "Phoenix", "Highlanders",
+  "Greyhounds", "Royals", "Penguins", "Bulls", "Mounties", "Cajuns",
+  "Sharks", "Anteaters", "Wolf Pack", "Aggies", "Bobcats", "Lumberjacks",
+  "Sycamores", "Salukis", "Redbirds", "Leathernecks", "Bengals",
+  "Quakers", "Bantams", "Statesmen", "Engineers", "Patriots",
+  "Minutemen", "Black Bears", "Catamounts", "Crusaders", "Lakers",
+  "Toreros", "Aggies", "Tritons", "Vandals", "Owls", "Golden Eagles",
+  "Redhawks"
+)
+
+canonicalize_college <- function(college) {
+  if (is.na(college) || college == "") return(NA_character_)
+  s <- college
+  # Strip mascot tokens first (try longest first to avoid partial matches)
+  for (mascot in .MASCOT_TOKENS[order(-nchar(.MASCOT_TOKENS))]) {
+    pattern <- paste0(" ", mascot, "$")
+    s <- str_remove(s, regex(pattern, ignore_case = TRUE))
+  }
+  s <- str_trim(s)
+  # Then synonym lookup on the mascot-stripped form (case-insensitive)
+  key <- str_to_lower(str_replace_all(s, "[\\.,'\\-]", " ")) |> str_squish()
+  syn <- COLLEGE_SYNONYMS[key]
+  if (!is.na(syn)) return(unname(syn))
+  s
+}
+
 p5_flag <- function(college, year) {
   year_key <- as.character(year)
   p5_confs <- P5_BY_YEAR[[year_key]]
-  conf <- COLLEGE_CONFERENCE$conference[match(college, COLLEGE_CONFERENCE$college)]
-  ifelse(college == "Notre Dame", TRUE,
+  # Canonicalize each input (vectorized via sapply for use in mutate(mapply(...)))
+  canon <- vapply(college, canonicalize_college, character(1))
+  conf <- COLLEGE_CONFERENCE$conference[match(canon, COLLEGE_CONFERENCE$college)]
+  ifelse(canon == "Notre Dame", TRUE,
          ifelse(!is.na(conf) & conf %in% p5_confs, TRUE, FALSE))
 }
 
 compute_best_ffppg <- function(stats, draft_year_lookup, max_years = 3) {
   # stats: long df with player_id, season, fantasy_points_ppr, games
-  # draft_year_lookup: named vector or tibble player_id → draft_year
-  if (is.list(draft_year_lookup) && !is.null(names(draft_year_lookup))) {
-    dy <- tibble(player_id = names(draft_year_lookup),
-                 draft_year = as.integer(unname(draft_year_lookup)))
+  # draft_year_lookup: tibble (player_id, draft_year) OR named numeric vector
+  if (inherits(draft_year_lookup, "data.frame")) {
+    dy <- draft_year_lookup
   } else if (is.atomic(draft_year_lookup) && !is.null(names(draft_year_lookup))) {
     dy <- tibble(player_id = names(draft_year_lookup),
                  draft_year = as.integer(unname(draft_year_lookup)))
   } else {
-    dy <- draft_year_lookup
+    stop("draft_year_lookup must be a data.frame or named numeric vector")
   }
   stats |>
     left_join(dy, by = "player_id") |>

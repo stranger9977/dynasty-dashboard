@@ -47,6 +47,25 @@ test_that("p5_flag handles realignment", {
   expect_false(p5_flag("Appalachian State", 2024)) # Sun Belt, never P5
 })
 
+test_that("canonicalize_college strips mascots and handles synonyms", {
+  expect_equal(canonicalize_college("Alabama Crimson Tide"), "Alabama")
+  expect_equal(canonicalize_college("Georgia Bulldogs"), "Georgia")
+  expect_equal(canonicalize_college("Ohio State Buckeyes"), "Ohio State")
+  expect_equal(canonicalize_college("Louisiana State Tigers"), "LSU")
+  expect_equal(canonicalize_college("Southern California"), "USC")
+  expect_equal(canonicalize_college("Ole Miss"), "Mississippi")
+  expect_equal(canonicalize_college("Notre Dame Fighting Irish"), "Notre Dame")
+  expect_equal(canonicalize_college("Iowa State Cyclones"), "Iowa State")
+  expect_equal(canonicalize_college("Georgia"), "Georgia")  # already canonical
+})
+
+test_that("p5_flag works with mascot-bearing names", {
+  expect_true(p5_flag("Alabama Crimson Tide", 2023))
+  expect_true(p5_flag("Ohio State Buckeyes", 2024))
+  expect_true(p5_flag("Louisiana State Tigers", 2023))
+  expect_true(p5_flag("Notre Dame Fighting Irish", 2024))
+})
+
 test_that("compute_best_ffppg picks max season FFPPG in Y1-Y3", {
   stats <- tibble::tribble(
     ~player_id, ~season, ~fantasy_points_ppr, ~games,
