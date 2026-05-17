@@ -67,7 +67,7 @@ test_that("p5_flag works with mascot-bearing names", {
 })
 
 test_that("assign_production_tier buckets FFPPG into canonical tiers", {
-  result <- assign_production_tier(c(NA, 0, 2.5, 3.0, 5, 7, 10, 12, 15, 17.9, 18, 22))
+  result <- assign_production_tier(c(NA, 0, 2.5, 3.0, 5, 7, 10, 12, 15, 16.4, 16.5, 22))
   expect_equal(as.character(result),
                c(NA, "Dart Throw", "Dart Throw", "Depth", "Depth", "Flex",
                  "Flex", "Starter", "Starter", "Starter", "Elite", "Elite"))

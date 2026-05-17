@@ -94,8 +94,8 @@ We define the ground-truth tier from realized production (best PPR FFPG, Y1–Y3
 
 | Production tier | Cutoff (PPR PPG) | Verbal anchor |
 |---|---|---|
-| **Elite** | ≥ 18 | RB1 / WR1 cornerstone |
-| **Starter** | 12 – 18 | RB2 / WR2 (weekly start) |
+| **Elite** | ≥ 16.5 | RB1 / WR1 cornerstone |
+| **Starter** | 12 – 16.5 | RB2 / WR2 (weekly start) |
 | **Flex** | 7 – 12 | FLEX-worthy |
 | **Depth** | 3 – 7 | bench |
 | **Dart Throw** | < 3 | irrelevant |

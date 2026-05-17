@@ -213,18 +213,18 @@ p5_flag <- function(college, year) {
 
 # FFPG-defined production tiers (PPR, best season Y1-Y3). Anchored to JJ's
 # verbal tier claims and standard fantasy convention.
-#   Elite       >= 18 PPG  (cornerstone, RB1/WR1)
-#   Starter     12 - 18    (RB2/WR2, weekly start)
-#   Flex        7 - 12     (flex consideration)
-#   Depth       3 - 7      (bench)
-#   Dart Throw  < 3        (irrelevant)
-PRODUCTION_TIER_CUTOFFS <- c(Elite = 18, Starter = 12, Flex = 7, Depth = 3)
+#   Elite       >= 16.5 PPG (cornerstone, RB1/WR1)
+#   Starter     12 - 16.5   (RB2/WR2, weekly start)
+#   Flex        7 - 12      (flex consideration)
+#   Depth       3 - 7       (bench)
+#   Dart Throw  < 3         (irrelevant)
+PRODUCTION_TIER_CUTOFFS <- c(Elite = 16.5, Starter = 12, Flex = 7, Depth = 3)
 
 assign_production_tier <- function(ffppg) {
   # Vectorized: returns ordered factor on canonical scale.
   out <- dplyr::case_when(
     is.na(ffppg)        ~ NA_character_,
-    ffppg >= 18         ~ "Elite",
+    ffppg >= 16.5       ~ "Elite",
     ffppg >= 12         ~ "Starter",
     ffppg >= 7          ~ "Flex",
     ffppg >= 3          ~ "Depth",
@@ -359,7 +359,7 @@ build_eval_df <- function() {
       # Convenience flags derived from production_tier — kept for any chart/
       # report code that wants a simple binary view.
       hit_flag = production_tier >= "Starter",   # Starter or Elite (>= 12 PPG)
-      elite_flag = production_tier == "Elite",   # >= 18 PPG
+      elite_flag = production_tier == "Elite",   # >= 16.5 PPG
       bust_flag = production_tier == "Dart Throw",  # < 3 PPG
       eval_window = if_else(guide_year == 2025, "Y1-only", "Y1-Y3"),
       canonical_tier = factor(canonical_tier,

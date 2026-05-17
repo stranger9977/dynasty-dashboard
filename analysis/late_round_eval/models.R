@@ -123,7 +123,7 @@ fit_classification <- function(df) {
 
 # Tier-vs-tier evaluation. Compares a predicted tier (his canonical_tier OR
 # a baseline_tier derived from age + log(draft_pick)) against the
-# production_tier defined by FFPG cutoffs (18 / 12 / 7 / 3).
+# production_tier defined by FFPG cutoffs (16.5 / 12 / 7 / 3).
 #
 # Returns:
 #   - confusion (5x5 table: rows = true production_tier, cols = predicted)
@@ -413,8 +413,9 @@ run_tier_eval <- function(eval_df) {
 
 
 compute_threshold_auc <- function(pred_numeric, truth_ffppg) {
-  hit <- as.integer(truth_ffppg >= 10)
-  elite <- as.integer(truth_ffppg >= 15)
+  # Use the same cutoffs as assign_production_tier: Starter >= 12, Elite >= 16.5
+  hit <- as.integer(truth_ffppg >= 12)
+  elite <- as.integer(truth_ffppg >= 16.5)
   auc_hit <- if (length(unique(hit)) == 2)
     as.numeric(pROC::auc(pROC::roc(hit, pred_numeric, quiet = TRUE))) else NA_real_
   auc_elite <- if (length(unique(elite)) == 2)

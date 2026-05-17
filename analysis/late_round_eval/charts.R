@@ -93,13 +93,23 @@ chart_slice_heatmap <- function(eval_df) {
     theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
 
-chart_score_scatter <- function(scored, label_top_n = 5) {
+chart_score_scatter <- function(scored, label_top_n = 3, jitter_tier_midpoints = TRUE) {
   df <- scored |> dplyr::filter(!is.na(jj_score), !is.na(baseline_score))
   df$is_late <- df$draft_round %in% c("day-3", "UDFA")
+
+  # For 2022-2023 players whose jj_score is a tier midpoint, add small
+  # uniform jitter on y so they don't pile up on horizontal lines.
+  if (jitter_tier_midpoints) {
+    set.seed(7)
+    is_midpoint <- df$jj_score_source == "tier representative (2022-2023)"
+    df$jj_score_plot <- df$jj_score +
+      ifelse(is_midpoint, runif(nrow(df), -4, 4), 0)
+  } else {
+    df$jj_score_plot <- df$jj_score
+  }
+
   df$bump <- df$jj_score - df$baseline_score
 
-  # Label the top N most-positive (JJ-bumps) and top N most-negative (JJ-fades)
-  # per position panel.
   label_df <- df |>
     dplyr::group_by(position) |>
     dplyr::mutate(rank_pos = dplyr::row_number(dplyr::desc(bump)),
@@ -107,30 +117,18 @@ chart_score_scatter <- function(scored, label_top_n = 5) {
     dplyr::filter(rank_pos <= label_top_n | rank_neg <= label_top_n) |>
     dplyr::ungroup()
 
-  quadrant_labels <- tibble::tribble(
-    ~x,  ~y,  ~hjust, ~vjust, ~label,
-     2, 100,  0,      1,      "JJ sleeper\n(he likes,\ndraft capital doesn't)",
-    99, 100,  1,      1,      "Consensus hit\n(both bullish)",
-     2,   2,  0,      0,      "Consensus pass\n(both bearish)",
-    99,   2,  1,      0,      "JJ fade\n(draft capital likes,\nhe doesn't)"
-  )
-
-  ggplot(df, aes(x = baseline_score, y = jj_score, color = production_tier)) +
+  ggplot(df, aes(x = baseline_score, y = jj_score_plot, color = production_tier)) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray60") +
-    geom_point(aes(shape = is_late), size = 2.5, alpha = 0.85) +
+    geom_point(aes(shape = is_late), size = 2.4, alpha = 0.85) +
     ggrepel::geom_text_repel(
       data = label_df,
       aes(label = name),
       inherit.aes = TRUE,
-      size = 2.8, max.overlaps = 30, seed = 1,
-      box.padding = 0.3, point.padding = 0.2, segment.alpha = 0.5,
+      size = 2.6, max.overlaps = 20, seed = 1,
+      box.padding = 0.35, point.padding = 0.2, segment.alpha = 0.4,
+      min.segment.length = 0.2,
       show.legend = FALSE
     ) +
-    geom_text(data = quadrant_labels,
-              aes(x = x, y = y, label = label, hjust = hjust, vjust = vjust),
-              inherit.aes = FALSE,
-              size = 3, color = "gray35", fontface = "italic",
-              lineheight = 0.9) +
     facet_wrap(~position) +
     scale_color_manual(values = TIER_COLORS, drop = FALSE) +
     scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
@@ -141,8 +139,8 @@ chart_score_scatter <- function(scored, label_top_n = 5) {
          y = "JJ score (0-100; ZAP for 2024-26, tier midpoint for 2022-23)",
          color = "Actual production tier",
          title = "Where JJ disagrees with draft capital — and who became what",
-         subtitle = sprintf("Top %d JJ-bumps and top %d JJ-fades per position labeled.",
-                            label_top_n, label_top_n)) +
+         subtitle = sprintf("Top-left = JJ sleepers (he likes, draft capital doesn't). Bottom-right = JJ fades. Top %d each way per panel labeled.",
+                            label_top_n)) +
     theme_minimal()
 }
 
@@ -218,7 +216,7 @@ chart_lift_curve <- function(eval_df) {
     geom_line(linewidth = 1) +
     geom_abline(linetype = "dashed", color = "gray") +
     labs(x = "Cumulative share of day-3+UDFA players evaluated",
-         y = "Cumulative share of hits (FFPPG >= 10) captured",
+         y = "Cumulative share of hits (Starter+, FFPPG >= 12) captured",
          title = "Late-round lift: ranking by guide vs draft capital",
          color = NULL) +
     theme_minimal()
