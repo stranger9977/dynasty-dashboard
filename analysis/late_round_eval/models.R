@@ -148,3 +148,74 @@ run_per_position_models <- function(eval_df) {
   }
   out
 }
+
+
+# ZAP-score-as-continuous-input comparison.
+# Restricted to 2024+ classes since 2022/2023 cheatsheets did not publish
+# per-player scores. Fits four nested models per position:
+#   baseline   : best_ffppg ~ age + log(draft_pick)
+#   +tier      : + canonical_tier (categorical, 5 levels)
+#   +zap       : + zap_score (continuous, 0-100)
+#   +both      : + canonical_tier + zap_score
+#
+# Returns a list of per-position results, each containing the four fits, a
+# tidy metrics table, and threshold AUCs.
+fit_zap_comparison <- function(eval_df) {
+  df_all <- eval_df |>
+    dplyr::filter(!is.na(zap_score), !is.na(best_ffppg),
+                  !is.na(age), !is.na(draft_pick), !is.na(canonical_tier))
+  out <- list()
+  for (pos in c("WR", "RB")) {
+    df <- df_all |> dplyr::filter(position == pos)
+    if (nrow(df) < 10) {
+      out[[pos]] <- list(error = sprintf("insufficient data (n=%d)", nrow(df)))
+      next
+    }
+    df$log_capital <- log(df$draft_pick)
+
+    m_baseline <- lm(best_ffppg ~ age + log_capital, data = df)
+    m_tier     <- lm(best_ffppg ~ age + log_capital + canonical_tier, data = df)
+    m_zap      <- lm(best_ffppg ~ age + log_capital + zap_score, data = df)
+    m_both     <- lm(best_ffppg ~ age + log_capital + canonical_tier + zap_score, data = df)
+
+    metrics_row <- function(name, m) {
+      pred <- predict(m)
+      list(
+        model = name,
+        n = nrow(df),
+        adj_r2 = summary(m)$adj.r.squared,
+        mae    = mean(abs(df$best_ffppg - pred)),
+        rmse   = sqrt(mean((df$best_ffppg - pred)^2)),
+        auc_hit   = compute_threshold_auc(pred, df$best_ffppg)$auc_hit,
+        auc_elite = compute_threshold_auc(pred, df$best_ffppg)$auc_elite
+      )
+    }
+
+    metrics <- bind_rows(
+      metrics_row("baseline (age + log capital)", m_baseline),
+      metrics_row("+ canonical_tier",             m_tier),
+      metrics_row("+ zap_score",                  m_zap),
+      metrics_row("+ canonical_tier + zap_score", m_both)
+    )
+
+    # Nested F-tests vs baseline
+    f_tier <- anova(m_baseline, m_tier)$`Pr(>F)`[2]
+    f_zap  <- anova(m_baseline, m_zap)$`Pr(>F)`[2]
+    f_both <- anova(m_baseline, m_both)$`Pr(>F)`[2]
+    # Marginal test: does zap add to a model that already has tier?
+    f_zap_over_tier <- anova(m_tier, m_both)$`Pr(>F)`[2]
+
+    out[[pos]] <- list(
+      df = df,
+      metrics = metrics,
+      f_tests = list(
+        tier_vs_baseline      = f_tier,
+        zap_vs_baseline       = f_zap,
+        both_vs_baseline      = f_both,
+        zap_adds_over_tier    = f_zap_over_tier
+      ),
+      fits = list(baseline = m_baseline, tier = m_tier, zap = m_zap, both = m_both)
+    )
+  }
+  out
+}

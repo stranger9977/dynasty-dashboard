@@ -141,6 +141,59 @@ if (nrow(feature_rows) > 0) {
 }
 ```
 
+# Tier definitions — his and ours
+
+## How JJ defines each tier
+
+The verbal tier scheme (2025–2026) is the only year-range where JJ publishes explicit definitions. **Each tier is a band of the ZAP Score** (his model output, 0–100 scale; higher = better prospect):
+
+| Canonical bucket | JJ's verbal tier (2025–2026) | Stated ZAP score band | JJ's production claim |
+|---|---|---|---|
+| Elite | Legendary Performer *(2026 only)* | 90–100 | "Generational talent. Hit at outstanding rates historically. Cornerstone dynasty asset." |
+| Elite | Elite Producer | 75–90 | "Best of the best. Legitimate shot at a cornerstone piece." |
+| Starter | Weekly Starter | 60–75 | "Stability in your starting lineup. Think RB2/WR2." |
+| Flex | Flex Play | 40–60 | "Rarely become league-winners. Can provide usable production." |
+| Depth | Benchwarmer | 30–40 | "Perfect for bench insurance." |
+| Depth | Waiver Wire Add | 20–30 | "Probably doesn't need to be rostered, but can occasionally be usable." |
+| Dart Throw | Dart Throw | 0–20 | "Very little chance for success." |
+
+For **2022–2024**, JJ uses purely **numeric tiers** from his Post-Draft Rookie Rankings Cheatsheet (Tier 1 → Tier 15 in 2022/2023; Tier 1 → Tier 12 in 2024 + an "Unranked" bucket for players he profiled but didn't rank). There is no verbal label or stated FFPG/ZAP cutoff per tier in those years — the "definition" is just rank order in the cheatsheet.
+
+## How WE map his tiers to our canonical 5-tier scheme
+
+To compare across years, we collapse every year's tier nomenclature to **{Elite, Starter, Flex, Depth, Dart Throw}** (canonical 5-tier scheme). The full mapping lives in `extraction/output/tier_map.json`; here's the summary by year:
+
+| Canonical | 2022 (numeric 1–15) | 2023 (Tier 1–15) | 2024 (Tier 1–12 + Unranked) | 2025 / 2026 (verbal) |
+|---|---|---|---|---|
+| **Elite** | 1 | Tier 1 | Tier 1 | Legendary Performer / Elite Producer |
+| **Starter** | 2–3 | Tier 2–3 | Tier 2–3 | Weekly Starter |
+| **Flex** | 4–6 | Tier 4–6 | Tier 4–5 | Flex Play |
+| **Depth** | 7–9 | Tier 7–9 | Tier 6–8 | Benchwarmer / Waiver Wire Add |
+| **Dart Throw** | 10–15 + Z-Prospect Ranked | Tier 10–15 | Tier 9–12 + Unranked | Dart Throw |
+
+Numeric tiers (2022–2024) were collapsed by proportional bucketing: ~top 7% → Elite, next ~15% → Starter, etc. The harmonizer's full rationale is in `tier_map.json` under the `rationale` key.
+
+## Empirical ZAP score distribution by canonical tier (2024–2026)
+
+What ZAP score does each canonical tier actually carry, year by year? (Players without ZAP scores — 2022/2023 cheatsheet-only — are excluded.)
+
+```{r zap-by-tier}
+harmonized_all |>
+  dplyr::filter(position %in% c("WR","RB"), !is.na(zap_score)) |>
+  group_by(guide_year, canonical_tier) |>
+  summarise(n = n(),
+            mean_zap = round(mean(zap_score), 1),
+            min_zap  = round(min(zap_score), 1),
+            max_zap  = round(max(zap_score), 1),
+            .groups = "drop") |>
+  pivot_wider(names_from = canonical_tier,
+              values_from = mean_zap,
+              id_cols = guide_year) |>
+  kable(caption = "Mean ZAP score by canonical tier and year (WR+RB only; 2022/2023 NA)")
+```
+
+The 2024 mapping looks compressed near the top because 2024 used many fine-grained numeric tiers; our canonical 5-tier collapse puts everyone Tier 1–5 into Elite/Starter/Flex, all with ZAP scores above 80. 2025/2026 verbal tiers spread across the full ZAP range more evenly.
+
 # Coverage 2022–2026
 
 ```{r coverage}
@@ -228,6 +281,46 @@ tibble::tibble(
   )
 ) |> kable(caption = "Production-threshold AUC. Baseline = continuous lm prediction of best_ffppg. Guide = his canonical_tier treated as ordinal 1–5 score.")
 ```
+
+# ZAP score as a continuous input (2024–2025 subset)
+
+The categorical eval above collapses his fine-grained ZAP score (0–100) into 5 buckets. That throws away information. The ZAP score itself is in the guide for 2024–2026; on the 2024–2025 subset with NFL production data, we can directly compare four nested regressions per position:
+
+1. **Baseline:** `best_ffppg ~ age + log(draft_pick)`
+2. **+ canonical_tier** (categorical, 5 levels)
+3. **+ zap_score** (continuous, 0–100)
+4. **+ canonical_tier + zap_score** (both)
+
+If his ZAP score carries any signal NFL draft capital misses, model 3 or 4 should beat model 1 on adjusted R², MAE, RMSE, and threshold AUC.
+
+```{r zap-models}
+zap_res <- fit_zap_comparison(eval_df)
+
+for (pos in c("WR", "RB")) {
+  if (!is.null(zap_res[[pos]]$error)) {
+    cat(sprintf("\n**%s:** %s\n\n", pos, zap_res[[pos]]$error))
+    next
+  }
+  cat(sprintf("\n### %s (n = %d, 2024–2025 only)\n\n", pos, zap_res[[pos]]$metrics$n[1]))
+  m <- zap_res[[pos]]$metrics |>
+    mutate(across(c(adj_r2, mae, rmse, auc_hit, auc_elite), ~ round(.x, 3))) |>
+    dplyr::select(model, adj_r2, mae, rmse, auc_hit, auc_elite)
+  print(kable(m, caption = sprintf("%s — nested model comparison on 2024–2025 subset", pos)))
+  cat("\n\n**Nested F-test p-values vs baseline:**\n\n")
+  ft <- zap_res[[pos]]$f_tests
+  print(kable(tibble::tibble(
+    test = c("+ canonical_tier vs baseline", "+ zap_score vs baseline",
+             "+ both vs baseline", "+ zap_score adds over canonical_tier"),
+    p_value = c(round(ft$tier_vs_baseline, 3),
+                round(ft$zap_vs_baseline, 3),
+                round(ft$both_vs_baseline, 3),
+                round(ft$zap_adds_over_tier, 3))
+  )))
+  cat("\n")
+}
+```
+
+**Read:** Neither the categorical tier nor the continuous ZAP score significantly improves on `age + log(draft_pick)` for either position on the 2024–2025 subset (all nested F-test p-values > 0.5). The threshold AUCs for the baseline alone are already very high (WR Hit AUC ≈ 0.93, RB Hit AUC ≈ 0.86), suggesting NFL draft capital + age does the heavy lifting on this small recent sample. **One caveat:** the 2024 class has only Y1–Y2 of production data (current date 2026-05-17) and 2025 has Y1 only — so the "best season Y1–Y3" target is artificially compressed, which compresses production variance and makes any predictor look better than it would on full Y1–Y3 data.
 
 # Slices — where (if anywhere) does he add value?
 

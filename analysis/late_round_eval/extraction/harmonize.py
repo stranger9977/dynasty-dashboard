@@ -1,10 +1,33 @@
-"""Tier harmonization: per-year labels → canonical 5-tier scheme."""
+"""Tier harmonization: per-year labels → canonical 5-tier scheme.
+
+Also extracts the per-player ZAP score (a 0-100 model output) from the
+source_quote when present. ZAP scores appear in 2024-2026 guide profile
+pages; 2022 and 2023 cheatsheets show only tier rank with no per-player
+continuous score.
+"""
 import json
+import re
 from pathlib import Path
 import pandas as pd
 
 
 CANONICAL_TIERS = ["Elite", "Starter", "Flex", "Depth", "Dart Throw"]
+
+
+# Trailing decimal in source_quote = ZAP score for 2024-2026.
+# E.g. "TRAVIS HUNTER • WR   97.1" → 97.1
+_ZAP_SCORE_PATTERN = re.compile(r"(\d+\.\d+)\s*$")
+
+
+def parse_zap_score(source_quote: str) -> float | None:
+    """Extract trailing decimal from source_quote as the ZAP / Z-Prospect score.
+
+    Returns None when the quote has no trailing decimal (2022/2023 format).
+    """
+    if not source_quote:
+        return None
+    m = _ZAP_SCORE_PATTERN.search(source_quote.strip())
+    return float(m.group(1)) if m else None
 
 
 def apply_tier_map(rows: list[dict], tier_map: dict) -> list[dict]:
@@ -26,12 +49,14 @@ def apply_tier_map(rows: list[dict], tier_map: dict) -> list[dict]:
 
 
 def build_harmonized_table(rows: list[dict], tier_map: dict) -> pd.DataFrame:
-    """Apply tier map and return a DataFrame with canonical_tier as ordered category."""
+    """Apply tier map and return a DataFrame with canonical_tier as ordered
+    category and zap_score parsed from source_quote (NA when not present)."""
     mapped = apply_tier_map(rows, tier_map)
     df = pd.DataFrame(mapped)
     df["canonical_tier"] = pd.Categorical(
         df["canonical_tier"], categories=CANONICAL_TIERS, ordered=True
     )
+    df["zap_score"] = df["source_quote"].apply(parse_zap_score)
     return df
 
 

@@ -6,8 +6,29 @@ import pytest
 from analysis.late_round_eval.extraction.harmonize import (
     apply_tier_map,
     build_harmonized_table,
+    parse_zap_score,
     CANONICAL_TIERS,
 )
+
+
+def test_parse_zap_score_2025_format():
+    # 2025/2026 style: "PLAYER • POS  ...  ZAP"
+    assert parse_zap_score(" TRAVIS HUNTER • WR                97.1") == 97.1
+
+
+def test_parse_zap_score_2024_format():
+    # 2024 style: "PLAYER  ZAP"
+    assert parse_zap_score(" MARVIN HARRISON JR.            99.3") == 99.3
+
+
+def test_parse_zap_score_no_score_returns_none():
+    # 2022 style: no trailing decimal
+    assert parse_zap_score(" Breece Hall  RB  1  Breece Hall  RB  1") is None
+
+
+def test_parse_zap_score_empty_returns_none():
+    assert parse_zap_score("") is None
+    assert parse_zap_score(None) is None
 
 
 def test_canonical_tiers_ordered():
