@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2026 NFL Schedule Analysis</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!--
+  ─────────────────────────────────────────────────────────────────
+  2026 NFL Schedule Deck — design notes
+  ─────────────────────────────────────────────────────────────────
+  Aesthetic: Athletic / 538 editorial. Charcoal frame around cream
+  content panels so the white-background charts sit inside a warm,
+  newsprint surround instead of popping off a pure-black field.
+
+  Palette
+    ink     #14171a   slide ground (warm charcoal, not pure black)
+    paper   #f5f1ea   chart-slide content panel (warm off-white)
+    rule    #d8d2c4   hairline dividers on paper
+    body    #2a2c2f   primary text on paper
+    mute    #6a6e74   secondary text
+    accent  #b8332a   single editorial red (emphasis, links, rules)
+    gold    #a17a1f   strong / number callouts on paper
+    slate   #3a5469   cool counterpart for env / data tags
+    warn    #c44a3b   caveat color
+    cream2  #efe9dc   subtle panel tint
+    onink   #f5f1ea   text on charcoal slides
+    onink-m #8a8e95   muted text on charcoal
+
+  Typography
+    Fraunces — display serif, optical-sized, for h1/h2 and pull-quotes
+    Inter    — body / findings / nav
+    JetBrains Mono — captions, codes, slide numbers
+
+  Slide structure
+    Title       — charcoal, big serif wordmark
+    Methodology — charcoal narrative
+    TOC         — charcoal, card grid by section
+    Section divs (4 NEW)       — full-bleed charcoal w/ section index
+    Chart slides — paper panel, tag chip + title + chart + findings
+                   + slim editorial "how to read" footnote band
+    Appendix div — kept
+    Takeaways    — paper, large pull-quote grid
+    Caveats      — paper, editorial fine-print
+    Built-with   — charcoal endplate
+
+  Transitions: fade (350ms). Custom footer w/ section indicator.
+  ─────────────────────────────────────────────────────────────────
+-->
+<style>
+  :root {
+    --ink: #14171a;
+    --ink-2: #1c2024;
+    --paper: #f5f1ea;
+    --paper-2: #efe9dc;
+    --rule: #d8d2c4;
+    --body: #2a2c2f;
+    --mute: #6a6e74;
+    --accent: #b8332a;
+    --accent-soft: #d96b5e;
+    --gold: #a17a1f;
+    --slate: #3a5469;
+    --warn: #c44a3b;
+    --onink: #f5f1ea;
+    --onink-m: #8a8e95;
+    --onink-rule: #2c3036;
+
+    --r-main-font: 'Inter', system-ui, -apple-system, sans-serif;
+    --r-heading-font: 'Fraunces', Georgia, serif;
+    --r-main-color: var(--onink);
+    --r-heading-color: var(--onink);
+    --r-background-color: var(--ink);
+    --r-link-color: var(--accent-soft);
+  }
+
+  html, body { background: var(--ink); }
+  .reveal { font-family: var(--r-main-font); color: var(--onink); font-weight: 400; }
+  .reveal-viewport { background: var(--ink) !important; }
+
+  /* ── Headings ─────────────────────────────────────────────── */
+  .reveal h1, .reveal h2, .reveal h3 {
+    font-family: var(--r-heading-font);
+    text-transform: none;
+    letter-spacing: -0.022em;
+    font-weight: 600;
+    line-height: 1.08;
+    color: var(--onink);
+  }
+  .reveal h2 {
+    font-size: 1.55em;
+    margin: 0 0 0.18em 0;
+    font-variation-settings: "opsz" 96;
+  }
+  .reveal h3 { font-size: 1em; font-weight: 600; }
+
+  .reveal .subtitle {
+    font-family: var(--r-heading-font);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--mute);
+    font-size: 0.5em;
+    margin: 0 0 0.9em 0;
+    letter-spacing: 0;
+    line-height: 1.3;
+  }
+
+  /* ── Tag chips ────────────────────────────────────────────── */
+  .reveal .tag {
+    display: inline-block;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.32em;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0.35em 0.85em;
+    border-radius: 2px;
+    margin-bottom: 0.55em;
+    background: transparent;
+    border: 1px solid currentColor;
+    color: var(--mute);
+  }
+  .reveal .tag.sos       { color: var(--accent); }
+  .reveal .tag.shape     { color: var(--slate); }
+  .reveal .tag.env       { color: #5a7a4a; }
+  .reveal .tag.narrative { color: var(--gold); }
+  .reveal .tag.ff        { color: var(--mute); }
+
+  /* ── PAPER (chart) slide ──────────────────────────────────── */
+  .reveal section.paper {
+    background: var(--paper);
+    color: var(--body);
+    padding: 1.5em 1.8em 1.0em;
+    border-radius: 4px;
+    text-align: left;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .reveal section.paper * { box-sizing: border-box; }
+  .reveal section.paper h2,
+  .reveal section.paper h3 { color: var(--body); }
+  .reveal section.paper .subtitle { color: var(--mute); }
+  .reveal section.paper a { color: var(--accent); }
+
+  /* ── Chart slide layout ───────────────────────────────────── */
+  .reveal .slide-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    gap: 1.2rem;
+    align-items: start;
+    margin-top: 0.3em;
+    width: 100%;
+    max-width: 100%;
+  }
+  .reveal .chart-wrap {
+    background: #ffffff;
+    padding: 0.45rem 0.5rem 0.3rem;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    box-shadow:
+      0 1px 0 rgba(20, 23, 26, 0.04),
+      0 12px 28px -16px rgba(20, 23, 26, 0.25);
+    min-width: 0;
+    overflow: hidden;
+  }
+  .reveal .chart {
+    max-height: 52vh;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    background: #fff;
+  }
+  /* Full-bleed chart variant: chart occupies the full slide (no findings sidebar). */
+  .reveal .chart-wrap.full { width: 100%; }
+  .reveal .chart.wide { max-height: 70vh; }
+  .reveal .how-to-read.full { margin-top: 0.7em; max-width: 95%; font-size: 0.3em; }
+  /* Full-bleed slides need a tighter heading so the chart isn't squeezed */
+  .reveal section.paper.full-bleed-chart h2 { font-size: 1.25em; line-height: 1.05; margin-bottom: 0.15em; }
+  .reveal section.paper.full-bleed-chart .subtitle { margin-bottom: 0.55em; }
+
+  /* ── Findings list ────────────────────────────────────────── */
+  .reveal .findings {
+    list-style: none;
+    padding-left: 0;
+    margin: 0.15em 0 0 0;
+    font-size: 0.46em;
+    line-height: 1.42;
+    color: var(--body);
+  }
+  .reveal .findings li {
+    margin: 0.7em 0;
+    padding-left: 1.1em;
+    position: relative;
+  }
+  .reveal .findings li:before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 0.55em;
+    height: 1px;
+    background: var(--accent);
+  }
+  .reveal .findings strong {
+    color: var(--gold);
+    font-weight: 600;
+  }
+  .reveal .findings .warn { color: var(--warn); font-weight: 500; }
+  .reveal .findings em { color: var(--mute); font-style: italic; }
+  .reveal .findings small { color: var(--mute); font-size: 0.85em; }
+
+  /* ── How-to-read footnote band ────────────────────────────── */
+  .reveal .how-to-read {
+    grid-column: 1 / -1;
+    margin-top: 1.1em;
+    padding-top: 0.7em;
+    border-top: 1px solid var(--rule);
+    font-size: 0.32em;
+    line-height: 1.5;
+    color: var(--mute);
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0.01em;
+    max-width: 92%;
+  }
+  .reveal .how-to-read strong {
+    color: var(--body);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.92em;
+    margin-right: 0.45em;
+  }
+  .reveal .how-to-read em { font-style: italic; color: var(--body); }
+
+  /* ── Title slide ──────────────────────────────────────────── */
+  .reveal section.title-slide { text-align: left; padding: 0 3em; }
+  .reveal .title-slide .eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.36em;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    margin-bottom: 1.6em;
+    display: flex;
+    align-items: center;
+    gap: 1em;
+  }
+  .reveal .title-slide .eyebrow::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--onink-rule);
+  }
+  .reveal .title-slide h1 {
+    font-size: 3.1em;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144;
+    letter-spacing: -0.028em;
+    line-height: 0.98;
+    color: var(--onink);
+    margin: 0 0 0.45em 0;
+  }
+  .reveal .title-slide h1 .accent {
+    color: var(--accent);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .reveal .title-slide .lead {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 0.6em;
+    color: var(--onink-m);
+    line-height: 1.5;
+    max-width: 28em;
+    margin: 0 0 2.4em 0;
+  }
+  .reveal .title-slide .lead b { color: var(--onink); font-weight: 500; font-style: normal; }
+  .reveal .title-slide .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.3em;
+    color: var(--onink-m);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex;
+    gap: 2.2em;
+  }
+  .reveal .title-slide .meta span b { color: var(--onink); font-weight: 500; }
+  .reveal .title-slide .nav-hint {
+    position: absolute;
+    bottom: 1.4em;
+    left: 3em;
+    right: 3em;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.26em;
+    color: var(--onink-m);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .reveal .title-slide .nav-hint code {
+    background: rgba(245,241,234,0.08);
+    padding: 0.15em 0.5em;
+    border-radius: 2px;
+    color: var(--onink);
+  }
+
+  /* ── Methodology ──────────────────────────────────────────── */
+  .reveal .methodology {
+    text-align: left;
+    max-width: 30em;
+    margin: 0 auto;
+    font-size: 0.5em;
+    line-height: 1.6;
+    color: var(--onink);
+  }
+  .reveal .methodology p { margin: 0.9em 0; }
+  .reveal .methodology strong { color: var(--onink); font-weight: 600; }
+  .reveal .methodology em { color: var(--onink-m); font-style: italic; }
+  .reveal .methodology code {
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(245,241,234,0.07);
+    padding: 0.08em 0.4em;
+    border-radius: 2px;
+    color: var(--accent-soft);
+    font-size: 0.92em;
+  }
+
+  /* ── TOC ──────────────────────────────────────────────────── */
+  .reveal .toc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.1em 1.6em;
+    text-align: left;
+    max-width: 90%;
+    margin: 0.6em auto 0;
+  }
+  .reveal .toc-card {
+    border: 1px solid var(--onink-rule);
+    padding: 0.9em 1em 0.7em;
+    border-radius: 3px;
+    background: rgba(245,241,234,0.015);
+  }
+  .reveal .toc-card.span2 { grid-column: 1 / -1; }
+  .reveal .toc-card .label {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.28em;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin-bottom: 0.45em;
+    display: block;
+  }
+  .reveal .toc-card.shape    .label { color: #6e8aa5; }
+  .reveal .toc-card.env      .label { color: #8fa97e; }
+  .reveal .toc-card.narrative .label { color: #c9a23a; }
+  .reveal .toc-card.ff       .label { color: var(--onink-m); }
+  .reveal .toc-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.35em;
+    line-height: 1.5;
+    color: var(--onink);
+  }
+  .reveal .toc-card li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7em;
+    padding: 0.2em 0;
+  }
+  .reveal .toc-card .num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--onink-m);
+    font-size: 0.85em;
+    min-width: 1.6em;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Section divider slides ───────────────────────────────── */
+  .reveal section.divider {
+    text-align: left;
+    padding: 0 3em;
+  }
+  .reveal .divider .roman {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 0.5em;
+    color: var(--mute);
+    letter-spacing: 0.2em;
+    margin-bottom: 0.8em;
+  }
+  .reveal .divider .roman .num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 500;
+    margin-right: 1em;
+  }
+  .reveal .divider h2 {
+    font-size: 2.6em;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144;
+    letter-spacing: -0.025em;
+    line-height: 1.02;
+    margin: 0 0 0.35em 0;
+    color: var(--onink);
+  }
+  .reveal .divider h2 em {
+    color: var(--accent);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .reveal .divider .dek {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 0.55em;
+    color: var(--onink-m);
+    max-width: 28em;
+    line-height: 1.45;
+  }
+  .reveal .divider .slate-list {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.3em;
+    color: var(--onink-m);
+    letter-spacing: 0.06em;
+    margin-top: 2em;
+    border-top: 1px solid var(--onink-rule);
+    padding-top: 0.9em;
+    max-width: 30em;
+  }
+  .reveal .divider .slate-list b { color: var(--onink); font-weight: 500; }
+
+  /* ── Appendix divider (kept, restyled) ────────────────────── */
+  .reveal section.appendix-divider { text-align: left; padding: 0 3em; }
+  .reveal .appendix-divider .roman {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 0.5em;
+    color: var(--mute);
+    letter-spacing: 0.2em;
+    margin-bottom: 0.8em;
+  }
+  .reveal .appendix-divider .roman .num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--gold);
+    font-style: normal;
+    margin-right: 1em;
+  }
+  .reveal .appendix-divider h2 {
+    font-size: 2.4em;
+    font-weight: 500;
+    color: var(--onink);
+  }
+  .reveal .appendix-divider .dek {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 0.55em;
+    color: var(--onink-m);
+    max-width: 28em;
+    line-height: 1.45;
+    margin-top: 0.3em;
+  }
+
+  /* ── Takeaways ────────────────────────────────────────────── */
+  .reveal section.paper.takeaways .eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.3em;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    margin-bottom: 0.5em;
+  }
+  .reveal .takeaway-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.3em 2.2em;
+    text-align: left;
+    margin-top: 0.5em;
+  }
+  .reveal .takeaway-grid .card {
+    border-top: 2px solid var(--body);
+    padding-top: 0.55em;
+  }
+  .reveal .takeaway-grid .card.accent { border-top-color: var(--accent); }
+  .reveal .takeaway-grid h3 {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 500;
+    color: var(--body);
+    font-size: 0.62em;
+    margin: 0 0 0.45em 0;
+    letter-spacing: -0.01em;
+  }
+  .reveal .takeaway-grid ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.42em;
+    line-height: 1.45;
+    color: var(--body);
+  }
+  .reveal .takeaway-grid li {
+    margin: 0.45em 0;
+    padding-left: 1em;
+    position: relative;
+  }
+  .reveal .takeaway-grid li:before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 0.5em;
+    height: 1px;
+    background: var(--accent);
+  }
+  .reveal .takeaway-grid strong { color: var(--gold); font-weight: 600; }
+
+  /* ── Caveats (editorial fine-print) ───────────────────────── */
+  .reveal section.paper.caveats-slide { padding-top: 2em; }
+  .reveal .caveats {
+    list-style: none;
+    padding: 0;
+    margin: 0.6em auto 0;
+    max-width: 92%;
+    counter-reset: cv;
+  }
+  .reveal .caveats li {
+    counter-increment: cv;
+    font-size: 0.4em;
+    line-height: 1.5;
+    color: var(--body);
+    padding: 0.7em 0 0.7em 2.2em;
+    position: relative;
+    border-bottom: 1px solid var(--rule);
+  }
+  .reveal .caveats li:last-child { border-bottom: none; }
+  .reveal .caveats li:before {
+    content: counter(cv, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 0.85em;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8em;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+  .reveal .caveats strong { color: var(--warn); font-weight: 600; }
+  .reveal .caveats code {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--paper-2);
+    padding: 0.05em 0.4em;
+    border-radius: 2px;
+    color: var(--accent);
+    font-size: 0.92em;
+  }
+
+  /* ── Built-with endplate ──────────────────────────────────── */
+  .reveal section.endplate { text-align: left; padding: 0 3em; }
+  .reveal .endplate .eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.3em;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    margin-bottom: 1em;
+  }
+  .reveal .endplate h2 {
+    font-size: 1.9em;
+    margin-bottom: 0.8em;
+  }
+  .reveal .endplate .colist {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.4em 2.4em;
+    font-size: 0.42em;
+    line-height: 1.55;
+    color: var(--onink);
+    max-width: 85%;
+  }
+  .reveal .endplate .colist h4 {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65em;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin: 0 0 0.35em 0;
+  }
+  .reveal .endplate code {
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(245,241,234,0.07);
+    padding: 0.08em 0.4em;
+    border-radius: 2px;
+    color: var(--accent-soft);
+    font-size: 0.95em;
+  }
+
+  /* ── Reveal chrome overrides ──────────────────────────────── */
+  .reveal .controls { color: var(--onink-m); }
+  .reveal .progress {
+    color: var(--accent);
+    background: rgba(245,241,234,0.06);
+    height: 3px;
+  }
+  .reveal .slide-number {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: transparent;
+    color: var(--onink-m);
+    letter-spacing: 0.08em;
+    right: 24px;
+    bottom: 14px;
+  }
+  /* On paper slides, slide number needs to be dark */
+  .reveal section.paper ~ .slide-number,
+  .reveal section.paper .slide-number { color: var(--mute); }
+
+  /* Custom footer (section indicator) */
+  .deck-footer {
+    position: fixed;
+    bottom: 14px;
+    left: 24px;
+    z-index: 30;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--onink-m);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    pointer-events: none;
+    transition: color 350ms ease;
+  }
+  .deck-footer .pipe { opacity: 0.4; margin: 0 0.7em; }
+  .deck-footer.on-paper { color: var(--mute); }
+
+  /* Fragment styling — fade up slightly */
+  .reveal .fragment.fade-up {
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 400ms ease-out;
+  }
+  .reveal .fragment.fade-up.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Selection */
+  .reveal ::selection { background: var(--accent); color: var(--onink); }
+  .reveal section.paper ::selection { background: var(--gold); color: var(--paper); }
+</style>
+</head>
+<body>
+<div class="reveal"><div class="slides">
+
+<!-- ═════════════════════════  TITLE  ═════════════════════════ -->
+<section class="title-slide" data-section="cover" data-transition="fade-in fade-out">
+  <div class="eyebrow">A Data Brief · 2026 Season</div>
+  <h1>The schedule,<br>read <span class="accent">sixteen ways</span>.</h1>
+  <p class="lead">
+    Strength of schedule from Vegas implied wins — <b>plus</b> the angles
+    a single SoS column can't see: where the rest tilts, when the gauntlets
+    land, which body clocks suffer, and which beat-writer narratives
+    survive a randomization test.
+  </p>
+  <div class="meta">
+    <span>Released <b>2026-05-14</b></span>
+    <span>Snapshot <b>2026-05-15</b></span>
+    <span>n = <b>272 games</b></span>
+  </div>
+  <div class="nav-hint">
+    <span>Navigate <code>→</code> <code>↓</code> &nbsp; · &nbsp; Shortcuts <code>?</code></span>
+    <span>nflverse · DraftKings · meteostat · Ourlads</span>
+  </div>
+</section>
+
+<!-- ═════════════════════════  METHODOLOGY  ═══════════════════ -->
+<section data-section="cover">
+  <span class="tag">Methodology</span>
+  <h2>One lens, applied sixteen times.</h2>
+  <p class="subtitle">How the SoS metric — and everything downstream — is computed.</p>
+  <div class="methodology">
+    <p><strong>Strength of Schedule (SoS)</strong> is derived from <strong>Vegas season win totals</strong>:
+    each team's win total <em>is</em> their implied wins. A team's SoS = the sum (or average) of
+    their 17 opponents' implied wins. This is the canonical lens used across every SoS-flavored
+    analysis in this deck.</p>
+    <p><strong>Win totals source:</strong> Rotowire / DraftKings as of 2026-05-15
+    <em>(one day after schedule release — lines will move)</em>.</p>
+    <p><strong>Schedule source:</strong> nflverse <code>games.csv</code> — full 272-game 2026 slate.</p>
+    <p><strong>Other inputs:</strong> nflverse play-by-play 2020-2025 (pace, return-week
+    retrospective), nflverse rosters (player movement), meteostat (stadium climate),
+    Ourlads (depth charts).</p>
+  </div>
+</section>
+
+<!-- ═════════════════════════  TOC  ═══════════════════════════ -->
+<section data-section="cover">
+  <span class="tag">Contents</span>
+  <h2>What's inside.</h2>
+  <p class="subtitle">Sixteen angles across four lenses, plus a fantasy-football appendix.</p>
+  <div class="toc-grid">
+    <div class="toc-card">
+      <span class="label">I · Strength of Schedule</span>
+      <ul>
+        <li><span class="num">01</span>Implied Wins SoS — the headline</li>
+        <li><span class="num">02</span>Front- vs back-loaded SoS</li>
+        <li><span class="num">03</span>Schedule luck (Monte Carlo)</li>
+        <li><span class="num">04</span>Gauntlet detector</li>
+      </ul>
+    </div>
+    <div class="toc-card shape">
+      <span class="label">II · Schedule Shape</span>
+      <ul>
+        <li><span class="num">05</span>Schedule volatility</li>
+        <li><span class="num">06</span>Bye leverage &amp; rest differential</li>
+        <li><span class="num">07</span>Schedule Leverage Index (composite)</li>
+      </ul>
+    </div>
+    <div class="toc-card env">
+      <span class="label">III · Environment</span>
+      <ul>
+        <li><span class="num">07</span>Travel miles &amp; time zones</li>
+        <li><span class="num">08</span>Body-clock map</li>
+        <li><span class="num">09</span>Wind exposure</li>
+      </ul>
+    </div>
+    <div class="toc-card narrative">
+      <span class="label">IV · Narrative</span>
+      <ul>
+        <li><span class="num">10</span>Revenge games</li>
+        <li><span class="num">11</span>International return-week dip</li>
+      </ul>
+    </div>
+    <div class="toc-card ff span2">
+      <span class="label">Appendix · Fantasy Football</span>
+      <ul style="columns: 2; column-gap: 2em;">
+        <li><span class="num">A1</span>Defensive Quality Composite</li>
+        <li><span class="num">A1b</span>Position SoS (FPA-based)</li>
+        <li><span class="num">A2</span>FF playoffs SoS (W14-16)</li>
+        <li><span class="num">A2a</span>RB schedule strength</li>
+        <li><span class="num">A2b</span>TE schedule strength</li>
+        <li><span class="num">A2c</span>QB schedule strength</li>
+        <li><span class="num">A3</span>Game-script RB SoS</li>
+        <li><span class="num">A4</span>Pace × pace play volume</li>
+        <li><span class="num">A5</span>CB/WR matchup index</li>
+        <li><span class="num">A6</span>WR schedule strength</li>
+        <li><span class="num">A7</span>Marquee WR-vs-CB matchups</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════  SECTION I — SoS  ═══════════════════════ -->
+<section class="divider" data-section="sos">
+  <p class="roman"><span class="num">I</span>Strength of Schedule</p>
+  <h2>How <em>hard</em> is hard,<br>and how much of it is <em>real</em>?</h2>
+  <p class="dek">Vegas win totals give every opponent a single number. Sum them across
+  seventeen games and you have a schedule's weight — but the same total can hide a
+  back-loaded slope, a four-week gauntlet, or pure scheduling noise. Four angles.</p>
+  <div class="slate-list">
+    <b>01</b> Implied Wins SoS &nbsp; · &nbsp;
+    <b>02</b> Front vs back-loaded &nbsp; · &nbsp;
+    <b>03</b> Schedule luck &nbsp; · &nbsp;
+    <b>04</b> Gauntlet detector
+  </div>
+</section>
+
+<section class="paper" data-section="sos">
+  <span class="tag sos">SoS · No. 01 — The Headline</span>
+  <h2>Implied Wins SoS.</h2>
+  <p class="subtitle">Sum of opponents' Vegas win totals across 17 games.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/implied_wins_sos/chart.png" alt="Total opponent implied wins by team"></div>
+    <ul class="findings">
+      <li class="fragment fade-up"><strong>Hardest schedule:</strong> ARI (156.5 opp wins, +0.64 vs avg)</li>
+      <li class="fragment fade-up"><strong>Top 5:</strong> ARI · MIA (152.5) · DAL · ATL · LA · CAR (150.5)</li>
+      <li class="fragment fade-up"><strong>Easiest:</strong> DET (135.5, -0.59 vs avg)</li>
+      <li class="fragment fade-up"><strong>Bottom 5:</strong> DET · NO (137.5) · CIN · KC (138.5) · CLE · NYJ · SF (140.5)</li>
+      <li class="fragment fade-up">Spread = <strong>21 wins</strong> between hardest and easiest schedule</li>
+      <li class="fragment fade-up">NFC South + NFC West skew hard; AFC North + AFC West skew easy</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Each team's SoS is the sum of their 17 opponents' Vegas win totals. League average is 144.5 total opponent wins. Higher = tougher slate. Red bars = above league avg, blue = below.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="sos">
+  <span class="tag sos">SoS · No. 02</span>
+  <h2>Front- vs back-loaded.</h2>
+  <p class="subtitle">H1 (W1–9) vs H2 (W10–18) opponent-quality swing.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/front_back_sos/chart.png" alt="H1 vs H2 SoS scatter"></div>
+    <ul class="findings">
+      <li><strong>Gets harder in the second half:</strong> PIT (+1.75), SF (+1.68), DET (+1.12)</li>
+      <li><strong>Gets easier in the second half:</strong> DEN (-1.79), BUF (-1.78), WAS (-1.68)</li>
+      <li>9 back-loaded · 8 front-loaded · 15 neutral schedules (±0.5 win-total threshold)</li>
+      <li>Useful for early-season power rankings and futures markets — front-loaded teams will look better than they are by mid-season</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> X-axis = team's average opponent win total in weeks 1–9 (H1). Y-axis = same for weeks 10–18 (H2). The diagonal = equal difficulty in both halves. <em>Above</em> the line: harder H2 (records will fade). <em>Below</em>: easier H2 (records will improve).</div>
+  </div>
+</section>
+
+<section class="paper" data-section="sos">
+  <span class="tag sos">SoS · No. 03</span>
+  <h2>Schedule luck — Monte Carlo.</h2>
+  <p class="subtitle">Is the "tough slate" real? 10 000 random-schedule sims per team.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/schedule_luck/chart.png" alt="Schedule luck percentile bars"></div>
+    <ul class="findings">
+      <li><strong>Genuinely unlucky:</strong> BUF (97.7%ile) · CAR (94.6%) · TB (92.1%)</li>
+      <li><strong>Genuinely lucky:</strong> DET (2.3%) · CLE (4.0%) · CIN (12.1%)</li>
+      <li>8 teams unlucky, 4 lucky, <strong>20 statistical noise</strong></li>
+      <li>~63% of "tough schedule" complaints don't survive a random-baseline test</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> The 6 division games are locked by NFL rules. For each team I redraw their 11 non-division opponents 10 000 times from the 24-team non-division pool, then compute SoS. The percentile = where their <em>actual</em> SoS lands. <strong>97%</strong> = harder than 97% of random draws (unlucky). <strong>3%</strong> = lucky. 15–85% = noise.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="sos">
+  <span class="tag sos">SoS · No. 04</span>
+  <h2>Gauntlet detector.</h2>
+  <p class="subtitle">3+ consecutive top-10 opponents (and the soft stretches).</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/gauntlet/chart.png" alt="Gauntlet Gantt chart"></div>
+    <ul class="findings">
+      <li><strong>Worst gauntlet:</strong> MIN W8–11 (DET, BUF, GB, SF) — avg opp WT 10.5</li>
+      <li><strong>Easiest stretch:</strong> DEN W13–15 (MIA, NYJ, LV) — avg WT 5.17</li>
+      <li><strong>Most fortunate:</strong> KC (6 easy weeks, 0 gauntlet)</li>
+      <li>Only <strong>7 league-wide gauntlets</strong> total — schedule mostly avoids pile-ups</li>
+      <li>Others: ARI W9–11, IND W1–3, PHI W15–17, LAC W8–10, LA W12–14, CHI W15–17</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Each row = one team's 18-week schedule. Cell color = opponent tier by Vegas win total — red = top 10, blue = bottom 10, gray = middle, black = bye. A "gauntlet" = 3+ consecutive red cells. Teams sorted by longest gauntlet desc.</div>
+  </div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="sos">
+  <span class="tag sos">SoS · meta — but does it matter?</span>
+  <h2>Does Schedule Strength actually matter?</h2>
+  <p class="subtitle">Historical retrospective 2017–2024 (n = 256 team-seasons).</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/sos_matters/chart.png" alt="Does SoS matter — retrospective">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> <strong>Left:</strong> raw correlation of in-season SoS percentile vs actual wins is slightly <em>positive</em> (r ≈ +0.22) — counterintuitive, but explained by team-strength endogeneity (good teams cluster in tough divisions, so their SoS looks high). <strong>Center:</strong> regress wins on own preseason strength, then look at the SoS effect on the residual — the line is nearly flat. The partial SoS coefficient is +0.12 wins per 1-point SoS swing, statistically indistinguishable from zero. <strong>Right:</strong> by decile, even the hardest-vs-easiest tail difference is only ~0.4 residual wins. <b>Bottom line:</b> after you control for your own talent, schedule strength barely moves the needle — most of what looks like "schedule effects" is actually team-strength effects.</div>
+</section>
+
+<!-- ═════════════════  SECTION II — SHAPE  ════════════════════ -->
+<section class="divider" data-section="shape">
+  <p class="roman"><span class="num">II</span>Schedule Shape</p>
+  <h2>Same weight,<br>different <em>distribution</em>.</h2>
+  <p class="dek">Two teams can share an identical SoS and still have wildly different
+  season arcs. Variance and rest — the texture of a slate — change how the same numbers
+  cash out over eighteen weeks.</p>
+  <div class="slate-list">
+    <b>05</b> Schedule volatility &nbsp; · &nbsp;
+    <b>06</b> Bye leverage &amp; rest differential &nbsp; · &nbsp;
+    <b>07</b> Schedule Leverage Index
+  </div>
+</section>
+
+<section class="paper" data-section="shape">
+  <span class="tag shape">Shape · No. 05</span>
+  <h2>Schedule volatility.</h2>
+  <p class="subtitle">Std of opponent quality — who has a boom/bust slate?</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/schedule_volatility/chart.png" alt="Schedule volatility by team"></div>
+    <ul class="findings">
+      <li><strong>Most boom/bust:</strong> LAC (σ=2.48) · BUF (2.41) · SF / NYJ (2.36) · DEN (2.32)</li>
+      <li><strong>Most steady:</strong> BAL (σ=1.38) · ATL (1.46) · HOU (1.58) · CAR / TB (1.59)</li>
+      <li>Volatile schedules → wider distribution of possible records (10-7 or 6-11 from the same projection)</li>
+      <li>Steady schedules → records cluster near projection (better win-total bets)</li>
+      <li>Wider opponent spread (max-min in win totals): 7.0 for NO, IND, CIN, DAL, BUF, LAC vs 4.0 for BAL</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For each team I compute the standard deviation of their 17 opponents' Vegas win totals. High σ = lots of variance — mixing cupcakes with contenders. Low σ = every opponent clusters near league average. Unlike Jaccard-on-shared-opponents (which mostly reproduces NFL scheduling rules), volatility varies meaningfully across teams.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="shape">
+  <span class="tag shape">Shape · No. 06</span>
+  <h2>Bye leverage &amp; rest differential.</h2>
+  <p class="subtitle">When the bye lands · who plays the most opps coming off a bye.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/bye_leverage/chart.png" alt="Rest differential by team"></div>
+    <ul class="findings">
+      <li><strong>Best net rest:</strong> CHI (+15), BUF (+14)</li>
+      <li><strong>Worst:</strong> LAC (-24) · PHI (-15)</li>
+      <li><strong>Opponents-off-bye:</strong> LAC faces 4 (worst); ARI faces zero</li>
+      <li>Early byes (W5–6): CAR, CIN, DET, KC, MIA, MIN</li>
+      <li>Late byes (W14): ARI, DAL</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Rest differential = Σ(own_rest_days − opp_rest_days) across 17 games, using nflverse days-since-last-game. Positive = team usually has more rest. Color = bye-week timing tier. "Opps off bye" = opponents arriving with 14 days rest.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="shape">
+  <span class="tag shape">Shape · No. 07 — composite</span>
+  <h2>Schedule Leverage Index.</h2>
+  <p class="subtitle">All-in-one environmental burden: rest · off-bye opps · body clock · travel · wind.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/schedule_leverage/chart.png" alt="Schedule Leverage Index composite by team"></div>
+    <ul class="findings">
+      <li><strong>Toughest environment:</strong> LAC (80) · PHI (80) · JAX (75) · LV (73) · LA (73) · SF (71)</li>
+      <li><strong>Easiest:</strong> CAR (26) · TEN (28) · DAL (31) · CHI (31) · MIN (31) · ATL (33)</li>
+      <li><strong>Each team's top burden:</strong> LAC = rest deficit; SF = travel; LV = body clock; CLE = wind</li>
+      <li>Composite is independent of opponent quality — it isolates non-SoS schedule pain</li>
+      <li>Useful as a tiebreaker when two teams have similar implied-wins SoS but different schedule environments</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Five non-opponent schedule burdens — rest differential, opponents off bye, body-clock disadvantage games, travel miles, wind exposure — each percentile-ranked within the league so 100 = worst burden in that dimension. The leverage index is the equal-weighted average. "Driver" = the dimension contributing most to that team's score.</div>
+  </div>
+</section>
+
+<!-- ═══════════════  SECTION III — ENVIRONMENT  ═══════════════ -->
+<section class="divider" data-section="env">
+  <p class="roman"><span class="num">III</span>Environment</p>
+  <h2>Air miles, body clocks,<br>and <em>weather</em>.</h2>
+  <p class="dek">Strength-of-schedule says nothing about the things a roster carries onto
+  the field — the late-night flight back from London, the 10 a.m. body-clock kickoff in
+  Philly, the November gusts off Lake Erie. Three angles.</p>
+  <div class="slate-list">
+    <b>07</b> Travel miles &amp; time zones &nbsp; · &nbsp;
+    <b>08</b> Body-clock map &nbsp; · &nbsp;
+    <b>09</b> Wind exposure
+  </div>
+</section>
+
+<section class="paper" data-section="env">
+  <span class="tag env">Env · No. 07</span>
+  <h2>Travel miles &amp; time zones.</h2>
+  <p class="subtitle">Great-circle from home stadium · neutral counts as travel for both teams.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/travel_miles/chart.png" alt="Travel miles by team"></div>
+    <ul class="findings">
+      <li><strong>Most-traveled:</strong> SF (18 946 mi) · LA (17 486) · JAX (15 947)</li>
+      <li>All three play overseas (Melbourne / London)</li>
+      <li><strong>Least:</strong> CAR (4 317) · CLE (4 537) · CHI (5 314)</li>
+      <li>16 of 32 teams play an international game</li>
+      <li>SF leads TZ burden at 28.0 absolute shift hours; BUF/JAX/MIA each have a back-to-back 1 500+ mile week</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Home games = 0 miles. Away/neutral games = great-circle (haversine) distance from home stadium to the actual venue. International games stack on top in a different shade. Time-zone shifts use UTC offsets at 2026-09-15 (avoids DST edge cases).</div>
+  </div>
+</section>
+
+<section class="paper" data-section="env">
+  <span class="tag env">Env · No. 08</span>
+  <h2>Body-clock map.</h2>
+  <p class="subtitle">Kickoff converted to each team's home tz (jet-lag proxy).</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/body_clock/chart.png" alt="Body clock burden by team"></div>
+    <ul class="findings">
+      <li><strong>Worst body-clock burden:</strong> LA &amp; LV (4 disadvantage games each)</li>
+      <li>LAC, SF, DEN: 3 each — all 1pm ET = 10am PT body clock</li>
+      <li>International games at 9:30am local = ~3:30–4:30am body clock for US teams</li>
+      <li>West Coast teams structurally disadvantaged by early ET windows</li>
+      <li><small>"Advantage" column inflated by routine 4pm slots — see caveats</small></li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For each game I take the local stadium kickoff time and convert it into the team's <em>home</em> time zone — that's their "body clock" kickoff. A 1pm-ET game in Philly = 10am-PT body clock for the visiting Rams. Any game ≥2h earlier than 1pm body-clock = disadvantage. International games hit ~3:30–4:30am body clock — the worst entries.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="env">
+  <span class="tag env">Env · No. 09</span>
+  <h2>Wind exposure.</h2>
+  <p class="subtitle">Historical climate per outdoor stadium via meteostat (2015–2024 daily).</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/wind_exposure/chart.png" alt="Wind exposure by team"></div>
+    <ul class="findings">
+      <li><strong>Most-exposed:</strong> CLE (156.5) · CHI (128.4) · PIT · BUF · MIA</li>
+      <li>Huntington Bank Field is the wind capital — 5 of 6 windiest games leaguewide</li>
+      <li>CHI has 6 high-wind games in late-season months</li>
+      <li><strong>Sheltered:</strong> ARI (25.5, 13 indoor games) · DAL · MIN · ATL · LV</li>
+      <li>178 outdoor games leaguewide, 15 flagged as high-wind</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For every outdoor NFL stadium I pulled 10 years of daily wind data from meteostat, then averaged by calendar month. Each 2026 game gets the historical avg wind for its stadium in its game month. A team's "exposure" = sum across their 17 games. Domes and retractables count as 0.</div>
+  </div>
+</section>
+
+<!-- ═══════════════  SECTION IV — NARRATIVE  ══════════════════ -->
+<section class="divider" data-section="narrative">
+  <p class="roman"><span class="num">IV</span>Narrative</p>
+  <h2>The stories the slate <em>tells</em><br>(and the ones it doesn't).</h2>
+  <p class="dek">Revenge games, jet-lag hangovers — the storylines a beat writer reaches
+  for first. Two of them, tested against the actual data.</p>
+  <div class="slate-list">
+    <b>10</b> Revenge games &nbsp; · &nbsp;
+    <b>11</b> International return-week dip
+  </div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="narrative">
+  <span class="tag narrative">Narrative · No. 10a — recent move</span>
+  <h2>Top 10 revenge games.</h2>
+  <p class="subtitle">vs a recent former team — players facing a club they played for in 2024 or 2025.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/revenge_games/table.png" alt="Top 10 revenge games — recent former team">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> Built from actual 2026 nflverse rosters. A player is in the pool if their 2026 team differs from any team they played for in 2024 or 2025. Cross-referenced with the 2026 schedule for actual face-offs, then ranked by blended dynasty value. Captures the recent free-agency / trade-driven reunions.</div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="narrative">
+  <span class="tag narrative">Narrative · No. 10b — drafted team</span>
+  <h2>Top 10 revenge games.</h2>
+  <p class="subtitle">vs the team that drafted them — career-long reunions.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/revenge_games/table_drafted.png" alt="Top 10 revenge games — drafted team">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> Same construction but uses the player's <code>draft_club</code> as the "former team" instead of their most recent prior team. Captures the deeper "I came up here" storylines — Saquon facing the Giants, Daniel Jones facing the Giants, A.J. Brown facing the Titans, Davante facing the Packers. UDFAs are excluded (no draft team).</div>
+</section>
+
+<section class="paper" data-section="narrative">
+  <span class="tag narrative">Narrative · No. 11</span>
+  <h2>International return-week dip.</h2>
+  <p class="subtitle">Historical retrospective 2007–2025 — does it exist?</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/intl_return_dip/chart.png" alt="Return-week margin distribution"></div>
+    <ul class="findings">
+      <li><strong>Return-week ATS cover:</strong> 51.4% vs 50.0% baseline (n=107)</li>
+      <li><strong>Margin:</strong> +0.23 vs +0.00 baseline</li>
+      <li>Within 1 SE — the "international hangover" is essentially noise</li>
+      <li><strong>Null result:</strong> don't fade return-week games on this basis</li>
+      <li>2026 has 9 international games (record) → biggest future sample to revisit</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For every team that played in an international game from 2007–2025, I checked their performance in the very next regular-season game — specifically did they cover the Vegas spread, and what was the scoring margin. The "baseline" is the league-wide 50% cover rate / 0-point margin across all games. If the international game tires teams out, return-week numbers should sit clearly below baseline. They don't.</div>
+  </div>
+</section>
+
+<!-- ═════════════════════  APPENDIX  ══════════════════════════ -->
+<section class="appendix-divider" data-section="appendix">
+  <p class="roman"><span class="num">V</span>Appendix</p>
+  <h2>Fantasy football angles.</h2>
+  <p class="dek">Same data, narrower lens — positional matchups, FF playoffs, RB game
+  script, pace, and the CB-vs-WR cinema games.</p>
+</section>
+
+<section class="paper full-bleed-chart" data-section="appendix">
+  <span class="tag ff">Appendix · A1 — defensive quality composite</span>
+  <h2>Defensive Quality Composite.</h2>
+  <p class="subtitle">A multi-source defensive rating — better than "last year's FPA" alone.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/defensive_quality/chart.png" alt="Defensive quality composite by team">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> Four defense signals blended: <b>3-yr weighted FPA</b> (35%) — historical performance · <b>cap spend on defense</b> (25%) — talent investment, via OverTheCap · <b>ESPN FPI defensive efficiency</b> (25%) — model-projected current strength · <b>Vegas season win total</b> (15%) — overall team strength proxy. Each signal percentile-ranked within the league; weighted sum produces a 0–100 composite. The downstream position SoS slides use this composite as the defensive-quality input instead of FPA alone.</div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A1b — by position (composite)</span>
+  <h2>Position SoS — composite-adjusted.</h2>
+  <p class="subtitle">Position-specific FPA blended with forward-looking signals: cap spend, FPI, Vegas WT.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/position_sos_composite/chart.png" alt="Composite-adjusted Position SoS heatmap"></div>
+    <ul class="findings">
+      <li><strong>Toughest RB schedules:</strong> CAR · BUF · LV · LAC · CHI</li>
+      <li><strong>Easiest RB schedules:</strong> PHI · DET · SEA · CLE · MIN</li>
+      <li>Composite includes 2026 cap investment in defense + ESPN FPI + Vegas win total — not purely backward-looking on 2023-25 FPA</li>
+      <li>Position-specific FPA still drives the bulk (50% weight) — defensive scheme fit by position</li>
+      <li>Compare to the team-level Defensive Quality Composite (A1) for a single-number lens</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For each defense per position: blend 50% position-FPA (recency-weighted 50/30/20) + 20% cap spend on defense + 20% ESPN FPI + 10% Vegas win total — all percentile-ranked within the league. For each offense team, average their opponents' composite-adjusted defensive quality, then percentile-rank. Higher = tougher matchups for that position group.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A2</span>
+  <h2>FF playoffs SoS (W14–16).</h2>
+  <p class="subtitle">Same FPA methodology, isolated to fantasy-playoff weeks.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/ff_playoffs_sos/chart.png" alt="FF Playoffs heatmap"></div>
+    <ul class="findings">
+      <li>Best RB playoff slates: SF, NYG, WAS</li>
+      <li>Best WR slates: ARI*, NE, DEN · best TE: CLE, SEA, DET</li>
+      <li class="warn"><strong>⚠ Bye in W14:</strong> ARI &amp; DAL — only 2 of 3 FF playoff games</li>
+      <li>Worst playoff slates: NO RBs · TEN WRs · CAR TEs</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Same FPA methodology as the previous slide, but the schedule is filtered to only weeks 14, 15, and 16 (standard fantasy playoffs). Teams with a W14 bye get just 2 of 3 playoff games — penalize accordingly. Heatmap is sorted by aggregate league-winner score across all 3 positions.</div>
+  </div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="appendix">
+  <span class="tag ff">Appendix · A2a — RB</span>
+  <h2>RB schedule strength.</h2>
+  <p class="subtitle">Each team's top dynasty RB vs the run defenses they'll face across 17 games.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/position_schedules/rb_schedule.png" alt="RB schedule strength">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> For each team's offense, average the opponent's RB-FPA-allowed across all 17 games, then percentile-rank within the league. Higher = tougher RB schedule (opponents are stingier vs RBs). Headshot / label = the team's top dynasty-value RB. Note: every RB on a team shares the same slate — this is a team-level outlook with the headline RB surfaced.</div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="appendix">
+  <span class="tag ff">Appendix · A2b — TE</span>
+  <h2>TE schedule strength.</h2>
+  <p class="subtitle">Each team's top dynasty TE vs the TE-defenses they'll face across 17 games.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/position_schedules/te_schedule.png" alt="TE schedule strength">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> Same methodology as the RB chart but uses opponent TE-FPA-allowed. TE production is famously schedule-dependent (single-week swings vs a soft-TE defense can be enormous), so this matters even more for TE than RB. Headshot / label = team's top dynasty-value TE.</div>
+</section>
+
+<section class="paper full-bleed-chart" data-section="appendix">
+  <span class="tag ff">Appendix · A2c — QB</span>
+  <h2>QB schedule strength.</h2>
+  <p class="subtitle">Each team's top dynasty QB vs the pass defenses they'll face across 17 games.</p>
+  <div class="chart-wrap full">
+    <img class="chart wide" src="output/position_schedules/qb_schedule.png" alt="QB schedule strength">
+  </div>
+  <div class="how-to-read full"><strong>How to read</strong> For each team, average their opponents' QB-FPA-allowed (standard scoring: pass_yds×0.04 + pass_TD×4 − INT×2 + rush_yds×0.1 + rush_TD×6 − fumble×2), recency-weighted 50/30/20 across 2023–25, then percentile-rank within the league. Higher = tougher pass defenses on the slate. Headshot / label = team's top dynasty-value QB.</div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A3</span>
+  <h2>Game-script RB SoS.</h2>
+  <p class="subtitle">Implied spreads → leading-share → RB volume ceiling.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/game_script_rb/chart.png" alt="Game-script bar chart"></div>
+    <ul class="findings">
+      <li><strong>Best RB game-script:</strong> BAL (9.24) — 8 games as 3+ pt favorite</li>
+      <li>SF, DET, PHI, SEA round out top 5</li>
+      <li><strong>Worst:</strong> MIA (7.37), ARI, LV — 6–8 games as 3+ pt underdog</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Win-total differential between two teams → implied per-game point spread (0.4×Δwins + 2.5 HFA). Spread → win probability via logistic (P = 1/(1+e^(−spread/7))). Sum the win probabilities across 17 games = expected leading-share — roughly how many games the team plays with a lead. RBs benefit from leads.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A4</span>
+  <h2>Pace × pace projected play volume.</h2>
+  <p class="subtitle">3-year baseline pace × opp def pace, with a Vegas-tilt for game-control effects.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/pace_volume/chart.png" alt="Projected play volume"></div>
+    <ul class="findings">
+      <li><strong>Most volume:</strong> DAL (1 092) · HOU (1 082) · CHI · LA · DET</li>
+      <li><strong>Least:</strong> LV (971) · MIA · NYJ · TEN · ARI</li>
+      <li>League avg 1 035; top-to-bottom spread now ~121 plays (~7 plays/game) — wider than before because the Vegas tilt amplifies the gap</li>
+      <li>Pass-catcher floor lift in high-pace high-game-total matchups (DAL, HOU lead)</li>
+      <li>Streamable defenses against the bottom-5 (limit volume = limit garbage points)</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Three-year recency-weighted (50/30/20) pace baseline: each team's offensive plays/game and defensive plays-allowed/game from 2023–25 PBP. For every 2026 game, blend (own offensive pace, opp's def pace allowed) and apply a <b>Vegas tilt</b>: combined win totals above league-average get a small upward play-volume nudge (game-control effect — better teams trade snaps faster). Sum across 17 = projected season volume.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A5</span>
+  <h2>CB/WR matchup index. <span style="color:var(--warn); font-size:0.7em">⚠</span></h2>
+  <p class="subtitle">Ourlads depth charts × CB quality composite.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/cb_wr_matchup/chart.png" alt="Team CB unit scores"></div>
+    <ul class="findings">
+      <li><strong>Top CB units:</strong> DEN · HOU · SEA · PIT · ATL</li>
+      <li><strong>Bottom:</strong> MIA · ARI · KC · LV · MIN</li>
+      <li>Toughest WR schedule: PIT (avg opp CB 82.2)</li>
+      <li class="warn"><strong>⚠ Caveat:</strong> PFR scrape blocked — fell back to PBP counting stats. Treat as tier list, not precise ranking.</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Scraped Ourlads for each team's CB1/CB2/Nickel. Each CB scored by a coverage composite (pass deflections + INTs + tackles per game, recency-weighted across 2024–25 PBP, percentile-ranked among qualified DBs). Team unit score = 0.45×CB1 + 0.35×CB2 + 0.20×Nickel. Higher = stronger CB room.</div>
+  </div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A6</span>
+  <h2>WR schedule strength.</h2>
+  <p class="subtitle">Each team's WR1 vs the CB units they'll face across 17 games.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/cb_wr_matchup/wr_schedule.png" alt="WR schedule strength by team"></div>
+    <ul class="findings">
+      <li><strong>Toughest WR schedules:</strong> PIT (DK Metcalf), JAX (Brian Thomas Jr.), CAR (Hunter Renfrow), CIN (Ja'Marr Chase)</li>
+      <li><strong>Easiest:</strong> LV, KC (Rashee Rice), TEN, IND</li>
+      <li>League avg ≈ 79 — spread is narrow (about 10 points top-to-bottom)</li>
+      <li>Every WR on a team shares the same schedule strength — this is a team-level outlook with the WR1 surfaced</li>
+      <li>JSMith-Njigba (SEA) and Nacua (LA) get above-average toughness; Chase pulls double duty against PIT, HOU, ATL</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> Each team's WR1 (from the dynasty dashboard's blended FC/KTC/LR rankings) is shown alongside their team's average opponent CB unit score across 17 games. Higher bar = tougher CB schedule = harder season for that WR room. Bar color shades green (easy) → red (hard).</div>
+  </div>
+</section>
+
+<section class="paper" data-section="appendix">
+  <span class="tag ff">Appendix · A7</span>
+  <h2>Marquee WR-vs-CB matchups.</h2>
+  <p class="subtitle">Top 18 individual games where elite WR meets elite CB unit.</p>
+  <div class="slide-grid">
+    <div class="chart-wrap"><img class="chart" src="output/cb_wr_matchup/marquee_matchups.png" alt="Marquee WR vs CB matchups"></div>
+    <ul class="findings">
+      <li><strong>#1 — JSMith-Njigba @ DEN W6</strong> (WR 92 × CB 94) — premier 2026 coverage matchup</li>
+      <li><strong>#2 — Ja'Marr Chase @ HOU W2</strong> (WR 93 × CB 92)</li>
+      <li><strong>#3 — Puka Nacua vs DEN W3</strong> (WR 87 × CB 94)</li>
+      <li>Chase appears 5× in the top 18 (faces PIT, HOU, ATL, CAR among tough units)</li>
+      <li>JSN appears 4× — SEA's heavy AFC/NFC West rotation</li>
+      <li>Set your DFS/dynasty alerts for these specific weeks</li>
+    </ul>
+    <div class="how-to-read"><strong>How to read</strong> For the top 40 WRs by blended dynasty value, I scored every game in their team's schedule by <em>WR quality × opp CB unit / 100</em>. Then deduped to one entry per (WR, opponent) pair and kept the top 18 league-wide. Higher = an elite WR facing an elite CB unit.</div>
+  </div>
+</section>
+
+<!-- ═════════════════════  TAKEAWAYS  ═════════════════════════ -->
+<section class="paper takeaways" data-section="closing">
+  <p class="eyebrow">In Closing</p>
+  <h2>Headline takeaways.</h2>
+  <p class="subtitle">If you only remember a dozen things from this brief.</p>
+  <div class="takeaway-grid">
+    <div class="card accent">
+      <h3>Strength of schedule</h3>
+      <ul>
+        <li><strong>Hardest:</strong> ARI, MIA, DAL, ATL, LA, CAR</li>
+        <li><strong>Easiest:</strong> DET, NO, CIN, KC</li>
+        <li>21-win spread between extremes</li>
+        <li>Most "tough schedule" narratives are noise (only 8 of 32 unlucky vs random)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Schedule shape</h3>
+      <ul>
+        <li>Back-loaded: PIT, SF, DET (sell-high on early records)</li>
+        <li>Front-loaded: DEN, BUF, WAS (slow start, real H2)</li>
+        <li>Only 7 league-wide 3+ game gauntlets</li>
+        <li>MIN W8–11 is the brutal one (DET/BUF/GB/SF)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Environment</h3>
+      <ul>
+        <li>SF/LA/JAX top travel burden (overseas games)</li>
+        <li>CLE/CHI/PIT/BUF most wind-exposed</li>
+        <li>West Coast teams structurally disadvantaged by body clock</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Null results worth knowing</h3>
+      <ul>
+        <li>International return-week dip is statistical noise</li>
+        <li>~63% of "tough schedule" complaints don't survive randomization</li>
+        <li>25 of 32 teams have zero gauntlet stretches</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════  CAVEATS  ═══════════════════════════ -->
+<section class="paper caveats-slide" data-section="closing">
+  <p class="eyebrow" style="font-family:'Inter',sans-serif;font-size:0.3em;font-weight:600;color:var(--accent);letter-spacing:0.25em;text-transform:uppercase;margin-bottom:0.5em;">Fine Print</p>
+  <h2>Caveats &amp; known limitations.</h2>
+  <p class="subtitle">Where the data is thinner than the chart suggests.</p>
+  <ol class="caveats">
+    <li><strong>Win totals snapshot</strong> — Rotowire/DraftKings as of 2026-05-15, one day after schedule release. Lines will move materially before week 1. Re-run <code>implied_wins_sos.py</code> with refreshed totals to update every SoS-derived analysis.</li>
+    <li><strong>CB/WR matchup</strong> — PFR returned 403; agent fell back to PBP counting stats (deflections + INTs + tackles). Noisier than passer-rating-allowed. Ourlads scrape missed ARI. Treat as a coarse tier, not a precise ranking.</li>
+    <li><strong>Body-clock map</strong> — "Advantage" threshold catches routine 4pm and primetime slots, inflating the count. Disadvantage column is the trustworthy one.</li>
+    <li><strong>Revenge games</strong> — Uses 2025 rosters as a 2026 proxy. Late summer signings/cuts will shift the list.</li>
+    <li><strong>International return-week dip</strong> — Documented as a null result; effect within 1 SE of baseline (n=107).</li>
+    <li><strong>Schedule luck Monte Carlo</strong> — Draws non-division opponents with replacement. A without-replacement constraint would tighten the distribution slightly.</li>
+  </ol>
+</section>
+
+<!-- ═════════════════════  ENDPLATE  ══════════════════════════ -->
+<section class="endplate" data-section="closing">
+  <p class="eyebrow">Colophon</p>
+  <h2>Built with.</h2>
+  <div class="colist">
+    <div>
+      <h4>Data</h4>
+      nflverse (schedule, PBP, rosters) · Rotowire / DraftKings (win totals) · meteostat (climate) · Ourlads (depth charts)
+    </div>
+    <div>
+      <h4>Code</h4>
+      pandas · matplotlib · networkx · zoneinfo · meteostat · beautifulsoup4
+    </div>
+    <div>
+      <h4>Module</h4>
+      <code>~/projects/dynasty-dashboard/analysis/schedule_2026/</code>
+    </div>
+    <div>
+      <h4>Re-run anything</h4>
+      <code>uv run python scripts/&lt;slug&gt;.py</code>
+    </div>
+  </div>
+</section>
+
+</div></div>
+
+<div class="deck-footer" id="deck-footer">
+  <span id="footer-section">2026 NFL Schedule Analysis</span><span class="pipe">·</span><span id="footer-date">2026-05-15</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'default',
+    backgroundTransition: 'fade',
+    controls: true,
+    progress: true,
+    center: true,
+    width: 1280,
+    height: 800,
+    margin: 0.04,
+  });
+
+  // Section labels for footer
+  const SECTION_LABEL = {
+    cover:     'Cover',
+    sos:       'I · Strength of Schedule',
+    shape:     'II · Schedule Shape',
+    env:       'III · Environment',
+    narrative: 'IV · Narrative',
+    appendix:  'Appendix · Fantasy Football',
+    closing:   'Closing',
+  };
+
+  function updateChrome() {
+    const cur = Reveal.getCurrentSlide();
+    if (!cur) return;
+    const section = cur.dataset.section || '';
+    const label = SECTION_LABEL[section] || '2026 NFL Schedule Analysis';
+    const fSec = document.getElementById('footer-section');
+    if (fSec) fSec.textContent = label;
+
+    const footer = document.getElementById('deck-footer');
+    const isPaper = cur.classList.contains('paper');
+    if (footer) footer.classList.toggle('on-paper', isPaper);
+    document.body.style.background = isPaper ? '#f5f1ea' : '#14171a';
+  }
+
+  Reveal.on('ready', updateChrome);
+  Reveal.on('slidechanged', updateChrome);
+</script>
+</body>
+</html>
