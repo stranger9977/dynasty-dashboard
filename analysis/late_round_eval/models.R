@@ -121,6 +121,223 @@ fit_classification <- function(df) {
        baseline_prob = baseline_prob)
 }
 
+# Tier-vs-tier evaluation. Compares a predicted tier (his canonical_tier OR
+# a baseline_tier derived from age + log(draft_pick)) against the
+# production_tier defined by FFPG cutoffs (18 / 12 / 7 / 3).
+#
+# Returns:
+#   - confusion (5x5 table: rows = true production_tier, cols = predicted)
+#   - per_tier (precision/recall/f1 per tier)
+#   - overall (accuracy, weighted F1, quadratic kappa, off-by-one rate)
+fit_tier_vs_tier <- function(predicted_tier, production_tier) {
+  tier_levels <- c("Dart Throw", "Depth", "Flex", "Starter", "Elite")
+  pred  <- factor(as.character(predicted_tier), levels = tier_levels, ordered = TRUE)
+  truth <- factor(as.character(production_tier), levels = tier_levels, ordered = TRUE)
+
+  ok <- !is.na(pred) & !is.na(truth)
+  pred <- pred[ok]; truth <- truth[ok]
+  n <- length(pred)
+
+  confusion <- table(truth = truth, pred = pred)
+
+  per_tier <- lapply(tier_levels, function(cls) {
+    tp <- sum(pred == cls & truth == cls)
+    fp <- sum(pred == cls & truth != cls)
+    fn <- sum(pred != cls & truth == cls)
+    support <- sum(truth == cls)
+    prec <- if (tp + fp == 0) NA_real_ else tp / (tp + fp)
+    rec  <- if (tp + fn == 0) NA_real_ else tp / (tp + fn)
+    f1   <- if (is.na(prec) || is.na(rec) || (prec + rec) == 0) NA_real_
+            else 2 * prec * rec / (prec + rec)
+    tibble(tier = cls, support = support, precision = prec, recall = rec, f1 = f1)
+  }) |> bind_rows()
+  per_tier$tier <- factor(per_tier$tier, levels = tier_levels, ordered = TRUE)
+
+  # Overall metrics
+  acc <- sum(pred == truth) / n
+  off_by_one <- sum(abs(as.integer(pred) - as.integer(truth)) <= 1) / n
+  wf1 <- weighted_f1(truth, pred, tier_levels)
+  kappa <- quadratic_weighted_kappa(truth, pred, tier_levels)
+
+  overall <- list(n = n, accuracy = acc, off_by_one_rate = off_by_one,
+                  weighted_f1 = wf1, quadratic_kappa = kappa)
+
+  list(confusion = confusion, per_tier = per_tier, overall = overall)
+}
+
+# Bucket a continuous prediction (from a baseline regression) into the same
+# FFPG-defined production tiers so we can compare apples-to-apples to JJ's
+# tier calls. Falls back to the same cutoffs as `assign_production_tier`.
+predict_tier_from_lm <- function(model, newdata) {
+  pred_ffppg <- predict(model, newdata = newdata)
+  # Reuse cutoffs by calling out to data_pipeline.R's helper (already sourced)
+  assign_production_tier(pred_ffppg)
+}
+
+
+# Build a percentile-rank baseline score (0-100) from `lm(best_ffppg ~ age +
+# log(draft_pick))`, fit and ranked WITHIN each position. Returns a tibble:
+#   player_id, position, baseline_score (0-100), zap_score (carried through),
+#   best_ffppg, production_tier
+# Use this to compare JJ's ZAP score and the draft-capital baseline on the
+# same 0-100 scale.
+build_score_table <- function(eval_df) {
+  out <- list()
+  for (pos in c("WR", "RB")) {
+    df <- eval_df |> dplyr::filter(position == pos,
+                                    !is.na(best_ffppg), !is.na(age), !is.na(draft_pick))
+    df$log_capital <- log(df$draft_pick)
+    m <- lm(best_ffppg ~ age + log_capital, data = df)
+    df$baseline_pred_ffppg <- predict(m)
+    # Percentile-rank within position. percent_rank returns 0-1; scale to 0-100.
+    df$baseline_score <- 100 * dplyr::percent_rank(df$baseline_pred_ffppg)
+    out[[pos]] <- df |>
+      dplyr::select(player_id, name, position, guide_year, draft_round, draft_pick,
+                    age, best_ffppg, production_tier, canonical_tier,
+                    zap_score, baseline_pred_ffppg, baseline_score)
+  }
+  dplyr::bind_rows(out)
+}
+
+
+# Quadrant classification on aligned (0-100) scores: bisect at 50.
+# Returns the score table with a `quadrant` column:
+#   high_zap_high_baseline  = both like the player ("consensus hit")
+#   high_zap_low_baseline   = JJ sleeper (he likes, draft capital doesn't)
+#   low_zap_high_baseline   = JJ fade (draft capital likes, he doesn't)
+#   low_zap_low_baseline    = consensus pass
+classify_quadrants <- function(scored, zap_threshold = 50, baseline_threshold = 50) {
+  scored |>
+    dplyr::filter(!is.na(zap_score)) |>
+    dplyr::mutate(
+      high_zap = zap_score >= zap_threshold,
+      high_base = baseline_score >= baseline_threshold,
+      quadrant = dplyr::case_when(
+         high_zap &  high_base ~ "Consensus hit",
+         high_zap & !high_base ~ "JJ sleeper",
+        !high_zap &  high_base ~ "JJ fade",
+        TRUE                   ~ "Consensus pass"
+      )
+    )
+}
+
+
+# Correlation of each score with continuous best_ffppg, per position. Also
+# returns the slope of best_ffppg on each score for interpretability.
+score_correlations <- function(scored) {
+  out <- list()
+  for (pos in c("WR", "RB")) {
+    df <- scored |> dplyr::filter(position == pos)
+    df_zap <- df |> dplyr::filter(!is.na(zap_score))
+    out[[pos]] <- tibble(
+      position = pos,
+      n_total = nrow(df), n_with_zap = nrow(df_zap),
+      cor_baseline = cor(df$baseline_score, df$best_ffppg),
+      cor_zap = if (nrow(df_zap) >= 5) cor(df_zap$zap_score, df_zap$best_ffppg)
+                else NA_real_,
+      slope_baseline = coef(lm(best_ffppg ~ baseline_score, data = df))[2],
+      slope_zap = if (nrow(df_zap) >= 5)
+                    coef(lm(best_ffppg ~ zap_score, data = df_zap))[2]
+                  else NA_real_
+    )
+  }
+  dplyr::bind_rows(out)
+}
+
+
+# JJ-vs-baseline disagreement analysis.
+#
+# Operational sleeper definition: a "JJ bump" is when JJ's ZAP score exceeds
+# the draft-capital + age baseline score on the same 0-100 scale. We bucket
+# the gap (zap - baseline) and report outcome distributions.
+#
+# Returns a tibble of per-player gaps + a summary by bump magnitude bucket.
+jj_bump_analysis <- function(scored, late_round_only = FALSE) {
+  df <- scored |>
+    dplyr::filter(!is.na(zap_score), !is.na(baseline_score)) |>
+    dplyr::mutate(
+      bump = zap_score - baseline_score,
+      bump_bucket = dplyr::case_when(
+        bump >=  30 ~ "Big JJ bump (+30 or more)",
+        bump >=  10 ~ "Moderate JJ bump (+10 to +30)",
+        bump >  -10 ~ "Neutral (within +-10)",
+        bump >  -30 ~ "Moderate JJ fade (-10 to -30)",
+        TRUE        ~ "Big JJ fade (-30 or worse)"
+      ),
+      bump_bucket = factor(bump_bucket, levels = c(
+        "Big JJ bump (+30 or more)",
+        "Moderate JJ bump (+10 to +30)",
+        "Neutral (within +-10)",
+        "Moderate JJ fade (-10 to -30)",
+        "Big JJ fade (-30 or worse)"
+      ))
+    )
+  if (late_round_only) {
+    df <- df |> dplyr::filter(draft_round %in% c("day-3", "UDFA"))
+  }
+
+  summary <- df |>
+    dplyr::group_by(position, bump_bucket) |>
+    dplyr::summarise(
+      n = dplyr::n(),
+      mean_ffppg = mean(best_ffppg),
+      starter_plus_rate = mean(production_tier >= "Starter"),
+      elite_rate = mean(production_tier == "Elite"),
+      bust_rate = mean(production_tier == "Dart Throw"),
+      .groups = "drop"
+    )
+
+  list(detail = df, summary = summary)
+}
+
+
+# Calibration: split each score into deciles, report mean best_ffppg and
+# fraction in each production_tier per decile. `score_col` is the column name
+# to bucket on ("baseline_score" or "zap_score").
+score_calibration <- function(scored, score_col, position_filter = NULL,
+                              n_buckets = 10) {
+  df <- scored
+  if (!is.null(position_filter)) df <- df |> dplyr::filter(position == position_filter)
+  df <- df |> dplyr::filter(!is.na(.data[[score_col]]))
+  if (nrow(df) == 0) return(tibble())
+  df$bucket <- ntile(df[[score_col]], n_buckets)
+  df |>
+    dplyr::group_by(bucket) |>
+    dplyr::summarise(
+      n = dplyr::n(),
+      score_min = min(.data[[score_col]]),
+      score_max = max(.data[[score_col]]),
+      mean_ffppg = mean(best_ffppg),
+      starter_plus_rate = mean(production_tier >= "Starter"),
+      elite_rate = mean(production_tier == "Elite"),
+      bust_rate = mean(production_tier == "Dart Throw"),
+      .groups = "drop"
+    )
+}
+
+# Full per-position eval: predicted_tier (his canonical_tier) and baseline_tier
+# (from age + log(draft_pick) -> FFPG -> bucket) both compared to production_tier.
+run_tier_eval <- function(eval_df) {
+  out <- list()
+  for (pos in c("WR", "RB")) {
+    df <- eval_df |> dplyr::filter(position == pos,
+                                    !is.na(production_tier),
+                                    !is.na(canonical_tier),
+                                    !is.na(age), !is.na(draft_pick))
+    df$log_capital <- log(df$draft_pick)
+    baseline_lm <- lm(best_ffppg ~ age + log_capital, data = df)
+    df$baseline_tier <- predict_tier_from_lm(baseline_lm, df)
+
+    his_eval <- fit_tier_vs_tier(df$canonical_tier, df$production_tier)
+    baseline_eval <- fit_tier_vs_tier(df$baseline_tier, df$production_tier)
+
+    out[[pos]] <- list(df = df, his = his_eval, baseline = baseline_eval,
+                       baseline_lm = baseline_lm)
+  }
+  out
+}
+
+
 compute_threshold_auc <- function(pred_numeric, truth_ffppg) {
   hit <- as.integer(truth_ffppg >= 10)
   elite <- as.integer(truth_ffppg >= 15)

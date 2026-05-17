@@ -92,6 +92,42 @@ chart_slice_heatmap <- function(eval_df) {
     theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
 
+chart_score_scatter <- function(scored) {
+  df <- scored |> dplyr::filter(!is.na(zap_score), !is.na(baseline_score))
+  df$is_late <- df$draft_round %in% c("day-3", "UDFA")
+  ggplot(df, aes(x = baseline_score, y = zap_score, color = production_tier)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray60") +
+    geom_point(aes(shape = is_late), size = 2.5, alpha = 0.85) +
+    facet_wrap(~position) +
+    scale_color_manual(values = TIER_COLORS, drop = FALSE) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
+                       labels = c(`FALSE` = "early-round", `TRUE` = "day-3 / UDFA"),
+                       name = NULL) +
+    labs(x = "Baseline score (age + log draft capital, 0-100 percentile)",
+         y = "JJ ZAP score (0-100)",
+         color = "Actual production tier",
+         title = "Where JJ disagrees with draft capital — and who became what",
+         subtitle = "Above the diagonal = JJ more bullish than baseline; below = JJ more bearish") +
+    theme_minimal()
+}
+
+chart_bump_outcomes <- function(bump_summary) {
+  bump_summary |>
+    ggplot(aes(x = bump_bucket, y = starter_plus_rate, fill = position)) +
+    geom_col(position = position_dodge(width = 0.85), width = 0.8) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.85), vjust = -0.4, size = 3) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                       expand = expansion(mult = c(0, 0.15))) +
+    scale_fill_brewer(palette = "Set1") +
+    labs(x = NULL, y = "Starter+ rate (production tier >= Starter)",
+         fill = "Position",
+         title = "Outcome rate by JJ vs baseline disagreement",
+         subtitle = "If JJ adds signal, the +bump buckets should hit at higher rates than the fades.") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 25, hjust = 1))
+}
+
 chart_lift_curve <- function(eval_df) {
   late <- eval_df |> dplyr::filter(draft_round %in% c("day-3", "UDFA"))
   if (nrow(late) < 5 || sum(late$hit_flag) == 0) {

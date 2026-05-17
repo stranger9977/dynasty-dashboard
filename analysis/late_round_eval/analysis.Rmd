@@ -90,30 +90,44 @@ fmt <- function(x, d = 2) ifelse(is.na(x), "—", sprintf(paste0("%.", d, "f"), 
 
 # Executive summary
 
+We define the ground-truth tier from realized production (best PPR FFPG, Y1–Y3 post-draft):
+
+| Production tier | Cutoff (PPR PPG) | Verbal anchor |
+|---|---|---|
+| **Elite** | ≥ 18 | RB1 / WR1 cornerstone |
+| **Starter** | 12 – 18 | RB2 / WR2 (weekly start) |
+| **Flex** | 7 – 12 | FLEX-worthy |
+| **Depth** | 3 – 7 | bench |
+| **Dart Throw** | < 3 | irrelevant |
+
+We compare JJ's predicted tier (`canonical_tier` from his guide) to this production tier, alongside a baseline tier derived from `lm(best_ffppg ~ age + log(draft_pick))` binned with the same cutoffs.
+
 ```{r exec-summary}
-wr_reg <- models_out$WR$regression$metrics
-rb_reg <- models_out$RB$regression$metrics
-wr_clf <- models_out$WR$classification$metrics
-rb_clf <- models_out$RB$classification$metrics
+tier_eval <- run_tier_eval(eval_df)
 
 tibble::tibble(
   Position = c("WR", "RB"),
-  N        = c(wr_reg$n, rb_reg$n),
-  `Baseline adj R²` = c(fmt(wr_reg$adj_r2_baseline), fmt(rb_reg$adj_r2_baseline)),
-  `Guide adj R²`    = c(fmt(wr_reg$adj_r2_guide), fmt(rb_reg$adj_r2_guide)),
-  `ΔR²`             = c(fmt(wr_reg$delta_r2), fmt(rb_reg$delta_r2)),
-  `F-test p`        = c(fmt(wr_reg$f_test_p, 3), fmt(rb_reg$f_test_p, 3)),
-  `Baseline κ`      = c(fmt(wr_clf$kappa_baseline), fmt(rb_clf$kappa_baseline)),
-  `Macro AUC base`  = c(fmt(wr_clf$macro_auc_baseline), fmt(rb_clf$macro_auc_baseline)),
-  `Macro AUC guide` = c(fmt(wr_clf$macro_auc_guide), fmt(rb_clf$macro_auc_guide))
-) |> kable()
+  N        = c(tier_eval$WR$his$overall$n, tier_eval$RB$his$overall$n),
+  `JJ accuracy`        = c(fmt(tier_eval$WR$his$overall$accuracy, 3),
+                            fmt(tier_eval$RB$his$overall$accuracy, 3)),
+  `Baseline accuracy`  = c(fmt(tier_eval$WR$baseline$overall$accuracy, 3),
+                            fmt(tier_eval$RB$baseline$overall$accuracy, 3)),
+  `JJ κ`               = c(fmt(tier_eval$WR$his$overall$quadratic_kappa, 3),
+                            fmt(tier_eval$RB$his$overall$quadratic_kappa, 3)),
+  `Baseline κ`         = c(fmt(tier_eval$WR$baseline$overall$quadratic_kappa, 3),
+                            fmt(tier_eval$RB$baseline$overall$quadratic_kappa, 3)),
+  `JJ weighted F1`     = c(fmt(tier_eval$WR$his$overall$weighted_f1, 3),
+                            fmt(tier_eval$RB$his$overall$weighted_f1, 3)),
+  `Baseline weighted F1` = c(fmt(tier_eval$WR$baseline$overall$weighted_f1, 3),
+                              fmt(tier_eval$RB$baseline$overall$weighted_f1, 3)),
+  `JJ off-by-one`      = c(fmt(tier_eval$WR$his$overall$off_by_one_rate, 3),
+                            fmt(tier_eval$RB$his$overall$off_by_one_rate, 3)),
+  `Baseline off-by-one`= c(fmt(tier_eval$WR$baseline$overall$off_by_one_rate, 3),
+                            fmt(tier_eval$RB$baseline$overall$off_by_one_rate, 3))
+) |> kable(caption = "Headline: JJ's canonical_tier vs baseline lm(best_ffppg ~ age + log(draft_pick)) binned via same cutoffs.")
 ```
 
-**Headline:** Across 2022–2025 rookie classes (WR n=`r wr_reg$n`, RB n=`r rb_reg$n`), the Late Round Prospect Guide's canonical tier `r if (wr_reg$delta_r2 > 0.02 || rb_reg$delta_r2 > 0.02) "adds modest signal over an age + log(draft_pick) baseline." else "does NOT add statistically significant signal over an age + log(draft_pick) baseline — his tier correlates with production, but that correlation is already captured by NFL draft capital."`
-
-**Verdict (WR):** `r if (wr_reg$delta_r2 > 0.05) "His tier adds material signal over draft capital + age." else if (wr_reg$delta_r2 > 0) "His tier adds marginal signal." else "His tier adds no signal beyond draft capital + age."`
-
-**Verdict (RB):** `r if (rb_reg$delta_r2 > 0.05) "His tier adds material signal over draft capital + age." else if (rb_reg$delta_r2 > 0) "His tier adds marginal signal." else "His tier adds no signal beyond draft capital + age."`
+**Headline:** On both positions, the age + log(draft_pick) baseline matches or beats JJ's canonical tier on quadratic kappa and off-by-one rate — confirming the regression result that draft capital captures most of his signal. The interesting story is in the per-tier breakdown below: where exactly he wins and loses.
 
 # Methodology evolution 2022–2025
 
@@ -210,117 +224,127 @@ harmonized_all |>
 
 **Note on 2026:** the 2026 class was extracted and harmonized but is excluded from all eval metrics. Player birthdates aren't yet in nflreadr for these rookies, and even if matched, they have no NFL season data yet.
 
-# Production by tier — what does each label actually mean?
+# Production tier distribution
 
-Each canonical tier maps to verbal descriptors with production claims (especially in 2025–2026). Here are the realized outcomes.
+How many of each FFPG-defined tier did 2022–2025 rookies actually produce?
+
+```{r production-tier-dist}
+eval_df |>
+  count(position, production_tier) |>
+  pivot_wider(names_from = production_tier, values_from = n, values_fill = 0) |>
+  kable(caption = "Production tier counts (eval set, 2022-2025)")
+```
 
 ```{r production-by-tier}
 chart_production_by_tier(eval_df)
 ```
 
-```{r tier-stats}
-eval_df |>
-  group_by(position, canonical_tier) |>
-  summarise(n = n(),
-            mean_ffppg = mean(best_ffppg, na.rm = TRUE),
-            median_ffppg = median(best_ffppg, na.rm = TRUE),
-            hit_rate = mean(hit_flag),
-            elite_rate = mean(elite_flag),
-            bust_rate = mean(bust_flag),
-            .groups = "drop") |>
-  arrange(position, desc(canonical_tier)) |>
-  mutate(across(c(mean_ffppg, median_ffppg), ~ round(.x, 2)),
-         across(c(hit_rate, elite_rate, bust_rate), ~ scales::percent(.x, accuracy = 1))) |>
-  kable(caption = "Realized production by canonical tier and position. Hit ≥10 PPR/g, Elite ≥15, Bust <5.")
+The boxplot still uses JJ's `canonical_tier` on the x-axis — it shows that his Elite/Starter calls do produce higher PPG on average, just with massive variance.
+
+# How JJ's tier compares to the production tier
+
+Below we compare JJ's predicted `canonical_tier` (from his guide) directly to the FFPG-defined `production_tier` (truth). For reference we also compare a baseline that predicts FFPG from `age + log(draft_pick)` and bins the prediction with the same cutoffs.
+
+## Confusion matrices
+
+```{r conf-his-wr, fig.width=8, fig.height=5}
+chart_confusion_matrix(tier_eval$WR$his$confusion, "WR — JJ's tier vs production tier")
 ```
 
-Tier ordering is monotonic on mean FFPPG for both positions, except WR Elite and Starter are statistically flat (the small WR Elite n=`r sum(eval_df$position=="WR" & eval_df$canonical_tier=="Elite")` means a single Puka Nacua–scale outlier could flip the order).
+```{r conf-base-wr, fig.width=8, fig.height=5}
+chart_confusion_matrix(tier_eval$WR$baseline$confusion, "WR — Baseline (age + log capital) tier vs production tier")
+```
 
-# Regression — does his tier add over draft capital + age?
+```{r conf-his-rb, fig.width=8, fig.height=5}
+chart_confusion_matrix(tier_eval$RB$his$confusion, "RB — JJ's tier vs production tier")
+```
 
-```{r reg-coefs, results='asis'}
+```{r conf-base-rb, fig.width=8, fig.height=5}
+chart_confusion_matrix(tier_eval$RB$baseline$confusion, "RB — Baseline (age + log capital) tier vs production tier")
+```
+
+Each row is the true tier (production-derived); each column is the predicted tier. Diagonal = correct, off-diagonal = miss.
+
+## Per-tier precision, recall, F1
+
+```{r per-tier-tables, results='asis'}
 for (pos in c("WR", "RB")) {
-  cat(sprintf("\n## %s\n\n", pos))
-  m <- models_out[[pos]]$regression$guide
-  print(broom::tidy(m) |>
-          mutate(across(where(is.numeric), ~ round(.x, 3))) |>
-          kable())
-}
-```
-
-# Classification — confusion matrices and AUC
-
-```{r confusion-wr}
-chart_confusion_matrix(models_out$WR$classification$confusion_baseline,
-                       "WR baseline ordinal logistic confusion (true vs predicted)")
-```
-
-```{r confusion-rb}
-chart_confusion_matrix(models_out$RB$classification$confusion_baseline,
-                       "RB baseline ordinal logistic confusion (true vs predicted)")
-```
-
-```{r threshold-auc}
-tibble::tibble(
-  Position = c("WR", "RB"),
-  `Hit AUC (baseline FFPPG pred)` = c(
-    fmt(models_out$WR$threshold_auc_baseline$auc_hit),
-    fmt(models_out$RB$threshold_auc_baseline$auc_hit)
-  ),
-  `Hit AUC (guide tier as ordinal)` = c(
-    fmt(models_out$WR$threshold_auc_guide$auc_hit),
-    fmt(models_out$RB$threshold_auc_guide$auc_hit)
-  ),
-  `Elite AUC (baseline)` = c(
-    fmt(models_out$WR$threshold_auc_baseline$auc_elite),
-    fmt(models_out$RB$threshold_auc_baseline$auc_elite)
-  ),
-  `Elite AUC (guide)` = c(
-    fmt(models_out$WR$threshold_auc_guide$auc_elite),
-    fmt(models_out$RB$threshold_auc_guide$auc_elite)
+  cat(sprintf("\n### %s\n\n", pos))
+  cat("\n**JJ's predictions:**\n\n")
+  print(
+    tier_eval[[pos]]$his$per_tier |>
+      mutate(across(c(precision, recall, f1), ~ round(.x, 3))) |>
+      kable()
   )
-) |> kable(caption = "Production-threshold AUC. Baseline = continuous lm prediction of best_ffppg. Guide = his canonical_tier treated as ordinal 1–5 score.")
-```
-
-# ZAP score as a continuous input (2024–2025 subset)
-
-The categorical eval above collapses his fine-grained ZAP score (0–100) into 5 buckets. That throws away information. The ZAP score itself is in the guide for 2024–2026; on the 2024–2025 subset with NFL production data, we can directly compare four nested regressions per position:
-
-1. **Baseline:** `best_ffppg ~ age + log(draft_pick)`
-2. **+ canonical_tier** (categorical, 5 levels)
-3. **+ zap_score** (continuous, 0–100)
-4. **+ canonical_tier + zap_score** (both)
-
-If his ZAP score carries any signal NFL draft capital misses, model 3 or 4 should beat model 1 on adjusted R², MAE, RMSE, and threshold AUC.
-
-```{r zap-models}
-zap_res <- fit_zap_comparison(eval_df)
-
-for (pos in c("WR", "RB")) {
-  if (!is.null(zap_res[[pos]]$error)) {
-    cat(sprintf("\n**%s:** %s\n\n", pos, zap_res[[pos]]$error))
-    next
-  }
-  cat(sprintf("\n### %s (n = %d, 2024–2025 only)\n\n", pos, zap_res[[pos]]$metrics$n[1]))
-  m <- zap_res[[pos]]$metrics |>
-    mutate(across(c(adj_r2, mae, rmse, auc_hit, auc_elite), ~ round(.x, 3))) |>
-    dplyr::select(model, adj_r2, mae, rmse, auc_hit, auc_elite)
-  print(kable(m, caption = sprintf("%s — nested model comparison on 2024–2025 subset", pos)))
-  cat("\n\n**Nested F-test p-values vs baseline:**\n\n")
-  ft <- zap_res[[pos]]$f_tests
-  print(kable(tibble::tibble(
-    test = c("+ canonical_tier vs baseline", "+ zap_score vs baseline",
-             "+ both vs baseline", "+ zap_score adds over canonical_tier"),
-    p_value = c(round(ft$tier_vs_baseline, 3),
-                round(ft$zap_vs_baseline, 3),
-                round(ft$both_vs_baseline, 3),
-                round(ft$zap_adds_over_tier, 3))
-  )))
+  cat("\n**Baseline (age + log capital) predictions:**\n\n")
+  print(
+    tier_eval[[pos]]$baseline$per_tier |>
+      mutate(across(c(precision, recall, f1), ~ round(.x, 3))) |>
+      kable()
+  )
   cat("\n")
 }
 ```
 
-**Read:** Neither the categorical tier nor the continuous ZAP score significantly improves on `age + log(draft_pick)` for either position on the 2024–2025 subset (all nested F-test p-values > 0.5). The threshold AUCs for the baseline alone are already very high (WR Hit AUC ≈ 0.93, RB Hit AUC ≈ 0.86), suggesting NFL draft capital + age does the heavy lifting on this small recent sample. **One caveat:** the 2024 class has only Y1–Y2 of production data (current date 2026-05-17) and 2025 has Y1 only — so the "best season Y1–Y3" target is artificially compressed, which compresses production variance and makes any predictor look better than it would on full Y1–Y3 data.
+**Read:** Precision answers "of players he tagged tier X, what fraction actually became tier X." Recall answers "of players who actually were tier X, what fraction did he catch." Both predictors over-call Dart Throw and Depth because most rookies bust — the meaningful question is the Starter/Elite rows.
+
+## Tier-call calibration: do his Elite calls actually become Elite?
+
+The diagonal cells of the confusion matrix above answer this directly. Pulling out the high-stakes tiers (Starter + Elite, where his model is essentially "this guy is fantasy-relevant"):
+
+```{r calibration}
+top_calls <- function(eval_obj, pos) {
+  conf <- eval_obj$confusion
+  tier_levels <- c("Dart Throw", "Depth", "Flex", "Starter", "Elite")
+  # for each predicted tier, what fraction of those calls reached that tier or above?
+  out <- lapply(tier_levels, function(cls) {
+    called <- sum(conf[, cls])
+    if (called == 0) return(tibble(position = pos, predicted_tier = cls,
+                                    n_called = 0, frac_at_or_above = NA_real_,
+                                    frac_exact = NA_real_))
+    truth_indices <- which(tier_levels == cls):length(tier_levels)
+    at_or_above <- sum(conf[truth_indices, cls])
+    exact <- conf[cls, cls]
+    tibble(position = pos, predicted_tier = cls, n_called = called,
+           frac_at_or_above = at_or_above / called,
+           frac_exact = exact / called)
+  }) |> bind_rows()
+  out
+}
+
+bind_rows(
+  top_calls(tier_eval$WR$his, "WR") |> mutate(predictor = "JJ"),
+  top_calls(tier_eval$WR$baseline, "WR") |> mutate(predictor = "Baseline"),
+  top_calls(tier_eval$RB$his, "RB") |> mutate(predictor = "JJ"),
+  top_calls(tier_eval$RB$baseline, "RB") |> mutate(predictor = "Baseline")
+) |>
+  mutate(predicted_tier = factor(predicted_tier,
+                                  levels = c("Dart Throw","Depth","Flex","Starter","Elite"),
+                                  ordered = TRUE)) |>
+  arrange(position, predictor, desc(predicted_tier)) |>
+  mutate(across(c(frac_at_or_above, frac_exact),
+                ~ ifelse(is.na(.x), "—", scales::percent(.x, accuracy = 1)))) |>
+  kable(caption = "Calibration: for each predicted tier, what fraction of calls were exactly correct vs. at-or-above the predicted tier.")
+```
+
+# Regression — supplementary
+
+The original regression-style read on the question "does his tier add over draft capital + age?" Same conclusion as the classification: no statistically significant signal.
+
+```{r reg-supp}
+tibble::tibble(
+  Position = c("WR", "RB"),
+  N = c(models_out$WR$regression$metrics$n, models_out$RB$regression$metrics$n),
+  `Baseline adj R²` = c(fmt(models_out$WR$regression$metrics$adj_r2_baseline),
+                         fmt(models_out$RB$regression$metrics$adj_r2_baseline)),
+  `+ canonical_tier adj R²` = c(fmt(models_out$WR$regression$metrics$adj_r2_guide),
+                                  fmt(models_out$RB$regression$metrics$adj_r2_guide)),
+  `ΔR²` = c(fmt(models_out$WR$regression$metrics$delta_r2),
+             fmt(models_out$RB$regression$metrics$delta_r2)),
+  `F-test p` = c(fmt(models_out$WR$regression$metrics$f_test_p, 3),
+                  fmt(models_out$RB$regression$metrics$f_test_p, 3))
+) |> kable()
+```
 
 # Slices — where (if anywhere) does he add value?
 
@@ -331,44 +355,111 @@ chart_slice_heatmap(eval_df)
 ```{r slice-table}
 eval_df |>
   group_by(position, draft_round, p5_flag) |>
-  summarise(n = n(), mean_ffppg = mean(best_ffppg, na.rm = TRUE),
-            hit_rate = mean(hit_flag), .groups = "drop") |>
+  summarise(n = n(),
+            mean_ffppg = mean(best_ffppg, na.rm = TRUE),
+            starter_plus_rate = mean(production_tier >= "Starter"),
+            .groups = "drop") |>
   mutate(mean_ffppg = round(mean_ffppg, 2),
-         hit_rate = scales::percent(hit_rate, accuracy = 1)) |>
-  kable(caption = "Production by position × draft round × P5")
+         starter_plus_rate = scales::percent(starter_plus_rate, accuracy = 1)) |>
+  kable(caption = "Production by position × draft round × P5. starter_plus_rate = fraction that reached production_tier Starter or Elite (best FFPG ≥ 12).")
 ```
 
-# Sleeper detection — day-3 + UDFA
+# Sleeper detection — when JJ disagrees with draft capital
 
-The sleeper-detection slice is where his tier might still add value: when NFL draft capital is uninformative (everyone has roughly the same low pick number), can his ZAP score / tier separate hits from busts?
+**Operational definition:** a JJ sleeper is a player where JJ's ZAP score (0–100) is higher than the draft-capital-and-age baseline score (also 0–100, percentile-ranked within position). The baseline is `lm(best_ffppg ~ age + log(draft_pick))` predictions, ranked.
 
-```{r lift}
-chart_lift_curve(eval_df)
+```{r score-table-build, results='asis'}
+scored <- build_score_table(eval_df)
+cat(sprintf("\nWith ZAP score available: **%d players** (2024-2025 only); without ZAP: **%d players** (2022-2023).\n\n",
+            sum(!is.na(scored$zap_score)), sum(is.na(scored$zap_score))))
 ```
 
-```{r late-named-examples}
-eval_df |>
-  dplyr::filter(draft_round %in% c("day-3", "UDFA")) |>
-  arrange(desc(best_ffppg)) |>
-  head(10) |>
-  dplyr::select(name, position, guide_year, canonical_tier, draft_round, best_ffppg) |>
-  mutate(best_ffppg = round(best_ffppg, 2)) |>
-  kable(caption = "Top 10 day-3+UDFA hits, with his tier call")
+## How often does JJ disagree with draft capital?
 
-late_misses <- eval_df |>
-  dplyr::filter(draft_round %in% c("day-3", "UDFA"),
-                canonical_tier %in% c("Starter", "Elite"),
-                best_ffppg < 5)
-if (nrow(late_misses) > 0) {
-  late_misses |>
-    arrange(canonical_tier, best_ffppg) |>
-    head(10) |>
-    dplyr::select(name, position, guide_year, canonical_tier, draft_round, best_ffppg) |>
-    mutate(best_ffppg = round(best_ffppg, 2)) |>
-    kable(caption = "Late-round Starter+ calls that didn't pan out (best FFPPG <5)")
-} else {
-  cat("No late-round Starter+ calls busted in the eval window.")
-}
+```{r jj-vs-baseline-counts}
+disagreement <- scored |>
+  dplyr::filter(!is.na(zap_score)) |>
+  dplyr::mutate(direction = dplyr::case_when(
+    zap_score > baseline_score + 10 ~ "JJ more bullish (+10 or more)",
+    zap_score < baseline_score - 10 ~ "JJ more bearish (-10 or worse)",
+    TRUE                            ~ "Roughly aligned (within +-10)"
+  ))
+disagreement |>
+  count(position, direction) |>
+  pivot_wider(names_from = direction, values_from = n, values_fill = 0) |>
+  kable(caption = "Counts of (JJ ZAP score) vs (baseline percentile score) disagreement, 2024-2025")
+```
+
+## The scatter — score-vs-score, colored by actual production tier
+
+Each point is a 2024–2025 rookie. The diagonal is "JJ agrees with draft capital." Players above the diagonal are JJ-bumps; below are JJ-fades. Color = actual production tier.
+
+```{r score-scatter, fig.height=6}
+chart_score_scatter(scored)
+```
+
+## Outcomes by JJ-bump magnitude
+
+If JJ has any independent signal, players he scores meaningfully higher than the baseline should hit Starter+ at higher rates than players where he agrees with the baseline (or fades).
+
+```{r bump-outcomes-full}
+bump_full <- jj_bump_analysis(scored)
+bump_full$summary |>
+  mutate(across(c(mean_ffppg), ~ round(.x, 2)),
+         across(c(starter_plus_rate, elite_rate, bust_rate),
+                ~ scales::percent(.x, accuracy = 1))) |>
+  kable(caption = "Outcomes by JJ-vs-baseline gap bucket — full eval set (2024-2025)")
+```
+
+```{r bump-chart-full, fig.height=4.5}
+chart_bump_outcomes(bump_full$summary)
+```
+
+## Late-round only (day-3 + UDFA)
+
+```{r bump-late}
+bump_late <- jj_bump_analysis(scored, late_round_only = TRUE)
+bump_late$summary |>
+  mutate(across(c(mean_ffppg), ~ round(.x, 2)),
+         across(c(starter_plus_rate, elite_rate, bust_rate),
+                ~ scales::percent(.x, accuracy = 1))) |>
+  kable(caption = "Outcomes by JJ-vs-baseline gap bucket — late-round only (day-3 + UDFA)")
+```
+
+## Named JJ-bump cases (biggest disagreements where JJ was more bullish)
+
+```{r jj-bumps-named}
+bump_full$detail |>
+  dplyr::filter(bump > 0) |>
+  arrange(desc(bump)) |>
+  head(15) |>
+  dplyr::select(name, position, guide_year, draft_round, baseline_score, zap_score, bump,
+                production_tier, best_ffppg) |>
+  mutate(across(c(baseline_score, zap_score, bump), ~ round(.x, 1)),
+         best_ffppg = round(best_ffppg, 1)) |>
+  kable(caption = "Top 15 JJ-bump players — biggest positive disagreement vs baseline. production_tier and best_ffppg show what actually happened.")
+```
+
+## Named JJ-fade cases (biggest disagreements where JJ was more bearish)
+
+```{r jj-fades-named}
+bump_full$detail |>
+  dplyr::filter(bump < 0) |>
+  arrange(bump) |>
+  head(15) |>
+  dplyr::select(name, position, guide_year, draft_round, baseline_score, zap_score, bump,
+                production_tier, best_ffppg) |>
+  mutate(across(c(baseline_score, zap_score, bump), ~ round(.x, 1)),
+         best_ffppg = round(best_ffppg, 1)) |>
+  kable(caption = "Top 15 JJ-fade players — biggest negative disagreement vs baseline.")
+```
+
+## Correlation with continuous best_ffppg
+
+```{r score-correlations}
+score_correlations(scored) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3))) |>
+  kable(caption = "Pearson correlation of each score with continuous best_ffppg, per position.")
 ```
 
 # Year-by-year scorecard
