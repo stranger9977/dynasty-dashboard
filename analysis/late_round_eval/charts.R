@@ -5,6 +5,7 @@ library(patchwork)
 library(scales)
 library(dplyr)
 library(tidyr)
+library(ggrepel)
 
 CHART_DIR <- "analysis/late_round_eval/charts"
 dir.create(CHART_DIR, recursive = TRUE, showWarnings = FALSE)
@@ -92,23 +93,86 @@ chart_slice_heatmap <- function(eval_df) {
     theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
 
-chart_score_scatter <- function(scored) {
-  df <- scored |> dplyr::filter(!is.na(zap_score), !is.na(baseline_score))
+chart_score_scatter <- function(scored, label_top_n = 5) {
+  df <- scored |> dplyr::filter(!is.na(jj_score), !is.na(baseline_score))
   df$is_late <- df$draft_round %in% c("day-3", "UDFA")
-  ggplot(df, aes(x = baseline_score, y = zap_score, color = production_tier)) +
+  df$bump <- df$jj_score - df$baseline_score
+
+  # Label the top N most-positive (JJ-bumps) and top N most-negative (JJ-fades)
+  # per position panel.
+  label_df <- df |>
+    dplyr::group_by(position) |>
+    dplyr::mutate(rank_pos = dplyr::row_number(dplyr::desc(bump)),
+                  rank_neg = dplyr::row_number(bump)) |>
+    dplyr::filter(rank_pos <= label_top_n | rank_neg <= label_top_n) |>
+    dplyr::ungroup()
+
+  quadrant_labels <- tibble::tribble(
+    ~x,  ~y,  ~hjust, ~vjust, ~label,
+     2, 100,  0,      1,      "JJ sleeper\n(he likes,\ndraft capital doesn't)",
+    99, 100,  1,      1,      "Consensus hit\n(both bullish)",
+     2,   2,  0,      0,      "Consensus pass\n(both bearish)",
+    99,   2,  1,      0,      "JJ fade\n(draft capital likes,\nhe doesn't)"
+  )
+
+  ggplot(df, aes(x = baseline_score, y = jj_score, color = production_tier)) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray60") +
     geom_point(aes(shape = is_late), size = 2.5, alpha = 0.85) +
+    ggrepel::geom_text_repel(
+      data = label_df,
+      aes(label = name),
+      inherit.aes = TRUE,
+      size = 2.8, max.overlaps = 30, seed = 1,
+      box.padding = 0.3, point.padding = 0.2, segment.alpha = 0.5,
+      show.legend = FALSE
+    ) +
+    geom_text(data = quadrant_labels,
+              aes(x = x, y = y, label = label, hjust = hjust, vjust = vjust),
+              inherit.aes = FALSE,
+              size = 3, color = "gray35", fontface = "italic",
+              lineheight = 0.9) +
     facet_wrap(~position) +
     scale_color_manual(values = TIER_COLORS, drop = FALSE) +
     scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17),
                        labels = c(`FALSE` = "early-round", `TRUE` = "day-3 / UDFA"),
                        name = NULL) +
-    labs(x = "Baseline score (age + log draft capital, 0-100 percentile)",
-         y = "JJ ZAP score (0-100)",
+    coord_cartesian(xlim = c(0, 100), ylim = c(0, 100)) +
+    labs(x = "Baseline score (age + log draft capital, 0-100 percentile within position)",
+         y = "JJ score (0-100; ZAP for 2024-26, tier midpoint for 2022-23)",
          color = "Actual production tier",
          title = "Where JJ disagrees with draft capital — and who became what",
-         subtitle = "Above the diagonal = JJ more bullish than baseline; below = JJ more bearish") +
+         subtitle = sprintf("Top %d JJ-bumps and top %d JJ-fades per position labeled.",
+                            label_top_n, label_top_n)) +
     theme_minimal()
+}
+
+chart_ranking_lift <- function(ranking_out) {
+  curves <- dplyr::bind_rows(
+    ranking_out$WR$cumulative_lift,
+    ranking_out$RB$cumulative_lift
+  ) |>
+    tidyr::pivot_longer(c(jj_cum_ffppg, baseline_cum_ffppg, optimal_cum_ffppg),
+                        names_to = "method", values_to = "cum_ffppg") |>
+    dplyr::mutate(method = dplyr::recode(method,
+      jj_cum_ffppg       = "JJ ranking",
+      baseline_cum_ffppg = "Draft capital + age ranking",
+      optimal_cum_ffppg  = "Optimal (oracle)"
+    ))
+
+  ggplot(curves, aes(x = k, y = cum_ffppg, color = method, linetype = method)) +
+    geom_line(linewidth = 0.9) +
+    facet_wrap(~position, scales = "free") +
+    scale_linetype_manual(values = c("JJ ranking" = "solid",
+                                      "Draft capital + age ranking" = "solid",
+                                      "Optimal (oracle)" = "22")) +
+    scale_color_brewer(palette = "Set1") +
+    labs(x = "Players drafted (in order of each method's ranking)",
+         y = "Cumulative best FFPG of players drafted",
+         color = NULL, linetype = NULL,
+         title = "Dynasty drafting: cumulative production if you'd followed each ranking",
+         subtitle = "Higher = picked better players first. Oracle = upper bound (sorted by actual production).") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
 }
 
 chart_bump_outcomes <- function(bump_summary) {

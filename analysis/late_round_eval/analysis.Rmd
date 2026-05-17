@@ -370,32 +370,31 @@ eval_df |>
 
 ```{r score-table-build, results='asis'}
 scored <- build_score_table(eval_df)
-cat(sprintf("\nWith ZAP score available: **%d players** (2024-2025 only); without ZAP: **%d players** (2022-2023).\n\n",
-            sum(!is.na(scored$zap_score)), sum(is.na(scored$zap_score))))
+cat(sprintf("\n**JJ score** is on a 0-100 scale: ZAP score directly for 2024-2026 (where JJ publishes it per-player), and a tier midpoint for 2022-2023 (where the cheatsheet only gives ordinal tier; we use JJ's own stated 2026 ZAP-band midpoints — Dart Throw=10, Depth=30, Flex=50, Starter=67.5, Elite=87.5). **Baseline score** is the percentile rank within position of `lm(best_ffppg ~ age + log(draft_pick))` predictions.\n\n"))
+cat(sprintf("Coverage: **%d total players** in the score table — **%d** with native ZAP (2024-25), **%d** with tier-midpoint fallback (2022-23).\n\n",
+            nrow(scored), sum(!is.na(scored$zap_score)), sum(is.na(scored$zap_score))))
 ```
 
 ## How often does JJ disagree with draft capital?
 
 ```{r jj-vs-baseline-counts}
-disagreement <- scored |>
-  dplyr::filter(!is.na(zap_score)) |>
+scored |>
   dplyr::mutate(direction = dplyr::case_when(
-    zap_score > baseline_score + 10 ~ "JJ more bullish (+10 or more)",
-    zap_score < baseline_score - 10 ~ "JJ more bearish (-10 or worse)",
-    TRUE                            ~ "Roughly aligned (within +-10)"
-  ))
-disagreement |>
+    jj_score > baseline_score + 10 ~ "JJ more bullish (+10 or more)",
+    jj_score < baseline_score - 10 ~ "JJ more bearish (-10 or worse)",
+    TRUE                           ~ "Roughly aligned (within +-10)"
+  )) |>
   count(position, direction) |>
   pivot_wider(names_from = direction, values_from = n, values_fill = 0) |>
-  kable(caption = "Counts of (JJ ZAP score) vs (baseline percentile score) disagreement, 2024-2025")
+  kable(caption = "Counts of (JJ score) vs (baseline percentile score) disagreement, 2022-2025 full eval set")
 ```
 
 ## The scatter — score-vs-score, colored by actual production tier
 
-Each point is a 2024–2025 rookie. The diagonal is "JJ agrees with draft capital." Players above the diagonal are JJ-bumps; below are JJ-fades. Color = actual production tier.
+Each point is a 2022–2025 rookie. The diagonal is "JJ agrees with draft capital." Points above = JJ-bumps; below = JJ-fades. Color = actual production tier. Triangles = day-3/UDFA, circles = early-round. Top 5 biggest disagreements each way (per position) are name-labeled.
 
-```{r score-scatter, fig.height=6}
-chart_score_scatter(scored)
+```{r score-scatter, fig.height=7, fig.width=11}
+chart_score_scatter(scored, label_top_n = 5)
 ```
 
 ## Outcomes by JJ-bump magnitude
@@ -433,9 +432,9 @@ bump_full$detail |>
   dplyr::filter(bump > 0) |>
   arrange(desc(bump)) |>
   head(15) |>
-  dplyr::select(name, position, guide_year, draft_round, baseline_score, zap_score, bump,
+  dplyr::select(name, position, guide_year, draft_round, baseline_score, jj_score, bump,
                 production_tier, best_ffppg) |>
-  mutate(across(c(baseline_score, zap_score, bump), ~ round(.x, 1)),
+  mutate(across(c(baseline_score, jj_score, bump), ~ round(.x, 1)),
          best_ffppg = round(best_ffppg, 1)) |>
   kable(caption = "Top 15 JJ-bump players — biggest positive disagreement vs baseline. production_tier and best_ffppg show what actually happened.")
 ```
@@ -447,19 +446,57 @@ bump_full$detail |>
   dplyr::filter(bump < 0) |>
   arrange(bump) |>
   head(15) |>
-  dplyr::select(name, position, guide_year, draft_round, baseline_score, zap_score, bump,
+  dplyr::select(name, position, guide_year, draft_round, baseline_score, jj_score, bump,
                 production_tier, best_ffppg) |>
-  mutate(across(c(baseline_score, zap_score, bump), ~ round(.x, 1)),
+  mutate(across(c(baseline_score, jj_score, bump), ~ round(.x, 1)),
          best_ffppg = round(best_ffppg, 1)) |>
   kable(caption = "Top 15 JJ-fade players — biggest negative disagreement vs baseline.")
 ```
 
-## Correlation with continuous best_ffppg
+# Ranking quality — for dynasty drafting
+
+If you're using one of these rankings to draft (1.01, 1.02, 1.03...), how well does each one order players against actual production? Three views.
+
+## Spearman rank correlation with actual best_ffppg
+
+```{r spearman}
+rank_out <- ranking_quality(scored)
+tibble::tibble(
+  Position = c("WR", "RB"),
+  N = c(rank_out$WR$n, rank_out$RB$n),
+  `Spearman: JJ vs actual`       = c(fmt(rank_out$WR$spearman_jj, 3),
+                                      fmt(rank_out$RB$spearman_jj, 3)),
+  `Spearman: Baseline vs actual` = c(fmt(rank_out$WR$spearman_baseline, 3),
+                                      fmt(rank_out$RB$spearman_baseline, 3))
+) |> kable(caption = "Spearman rank correlation of each score with actual best_ffppg.")
+```
+
+## Top-K precision — of the top K by each ranking, what fraction were truly top K?
+
+```{r top-k}
+dplyr::bind_rows(
+  rank_out$WR$top_k |> mutate(position = "WR"),
+  rank_out$RB$top_k |> mutate(position = "RB")
+) |>
+  dplyr::select(position, k, jj_precision, baseline_precision) |>
+  mutate(across(c(jj_precision, baseline_precision), ~ scales::percent(.x, accuracy = 1))) |>
+  kable(caption = "Of the top K players each ranker selected, fraction that were actually top K by best_ffppg.")
+```
+
+## Cumulative production curve
+
+If you drafted strictly in each ranker's order, this is the total `best_ffppg` you would have accumulated as you went down the list. Steeper = better ranker (picks the productive players first). The dashed line is the oracle upper bound (ranking by actual production).
+
+```{r ranking-lift, fig.height=4.5, fig.width=11}
+chart_ranking_lift(rank_out)
+```
+
+## Pearson correlation with continuous best_ffppg
 
 ```{r score-correlations}
 score_correlations(scored) |>
   mutate(across(where(is.numeric), ~ round(.x, 3))) |>
-  kable(caption = "Pearson correlation of each score with continuous best_ffppg, per position.")
+  kable(caption = "Pearson correlation of each score with continuous best_ffppg. pearson_zap_only_2024_25 restricts to ZAP-available years for a like-for-like ZAP-vs-baseline comparison.")
 ```
 
 # Year-by-year scorecard

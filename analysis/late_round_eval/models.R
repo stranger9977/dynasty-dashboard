@@ -175,12 +175,34 @@ predict_tier_from_lm <- function(model, newdata) {
 }
 
 
-# Build a percentile-rank baseline score (0-100) from `lm(best_ffppg ~ age +
-# log(draft_pick))`, fit and ranked WITHIN each position. Returns a tibble:
-#   player_id, position, baseline_score (0-100), zap_score (carried through),
-#   best_ffppg, production_tier
-# Use this to compare JJ's ZAP score and the draft-capital baseline on the
-# same 0-100 scale.
+# Representative ZAP-score value for each canonical tier, used to derive a
+# JJ score for 2022/2023 players where the cheatsheet didn't publish per-
+# player scores. Midpoints follow JJ's own 2026 stated ZAP score bands:
+#   Dart Throw 0-20 (mid 10), Depth 20-40 (mid 30), Flex 40-60 (mid 50),
+#   Starter 60-75 (mid 67.5), Elite 75-100 (mid 87.5).
+TIER_SCORE_REPRESENTATIVE <- c(
+  "Dart Throw" = 10,
+  "Depth"      = 30,
+  "Flex"       = 50,
+  "Starter"    = 67.5,
+  "Elite"      = 87.5
+)
+
+tier_to_score <- function(tier) {
+  out <- unname(TIER_SCORE_REPRESENTATIVE[as.character(tier)])
+  out
+}
+
+
+# Build a 0-100 score table comparing JJ's view (zap_score where available,
+# tier-representative fallback otherwise) to a draft-capital + age baseline.
+# Both scores are on a 0-100 scale so they're apples-to-apples.
+#
+# Output columns include:
+#   jj_score          - ZAP if present, else TIER_SCORE_REPRESENTATIVE lookup
+#   jj_score_source   - "zap" or "tier_representative"
+#   baseline_score    - percentile rank (within position) of lm(best_ffppg ~
+#                       age + log(draft_pick)) prediction
 build_score_table <- function(eval_df) {
   out <- list()
   for (pos in c("WR", "RB")) {
@@ -189,14 +211,68 @@ build_score_table <- function(eval_df) {
     df$log_capital <- log(df$draft_pick)
     m <- lm(best_ffppg ~ age + log_capital, data = df)
     df$baseline_pred_ffppg <- predict(m)
-    # Percentile-rank within position. percent_rank returns 0-1; scale to 0-100.
     df$baseline_score <- 100 * dplyr::percent_rank(df$baseline_pred_ffppg)
+    df$jj_score <- dplyr::coalesce(df$zap_score, tier_to_score(df$canonical_tier))
+    df$jj_score_source <- ifelse(!is.na(df$zap_score),
+                                  "zap (2024-2026)",
+                                  "tier representative (2022-2023)")
     out[[pos]] <- df |>
       dplyr::select(player_id, name, position, guide_year, draft_round, draft_pick,
                     age, best_ffppg, production_tier, canonical_tier,
-                    zap_score, baseline_pred_ffppg, baseline_score)
+                    zap_score, jj_score, jj_score_source,
+                    baseline_pred_ffppg, baseline_score)
   }
   dplyr::bind_rows(out)
+}
+
+
+# Ranking quality: how well does each score rank players against actual
+# production? Useful for dynasty drafting where order of selection matters.
+#
+# Returns per-position metrics:
+#   spearman_jj / spearman_baseline  - rank correlation with best_ffppg
+#   top_k_precision                  - of top K players by score, what fraction
+#                                       are also top K by actual best_ffppg
+#                                       (K = 5, 10, 20, 30)
+#   cumulative_lift                  - tibble (k, jj_cum_ffppg, baseline_cum_ffppg,
+#                                       optimal_cum_ffppg) for plotting
+ranking_quality <- function(scored) {
+  out <- list()
+  for (pos in c("WR", "RB")) {
+    df <- scored |> dplyr::filter(position == pos)
+    n <- nrow(df)
+    spearman_jj <- cor(df$jj_score, df$best_ffppg, method = "spearman")
+    spearman_baseline <- cor(df$baseline_score, df$best_ffppg, method = "spearman")
+
+    top_k_precision <- function(score_vec, k) {
+      truth_top   <- order(df$best_ffppg, decreasing = TRUE)[seq_len(min(k, n))]
+      pred_top    <- order(score_vec,      decreasing = TRUE)[seq_len(min(k, n))]
+      length(intersect(truth_top, pred_top)) / min(k, n)
+    }
+    ks <- c(5, 10, 20, 30)
+    top_k <- tibble::tibble(
+      k = ks,
+      jj_precision       = vapply(ks, function(k) top_k_precision(df$jj_score, k), numeric(1)),
+      baseline_precision = vapply(ks, function(k) top_k_precision(df$baseline_score, k), numeric(1))
+    )
+
+    cumulative_lift_rows <- tibble::tibble(
+      k = seq_len(n),
+      jj_cum_ffppg       = cumsum(df$best_ffppg[order(df$jj_score, decreasing = TRUE)]),
+      baseline_cum_ffppg = cumsum(df$best_ffppg[order(df$baseline_score, decreasing = TRUE)]),
+      optimal_cum_ffppg  = cumsum(sort(df$best_ffppg, decreasing = TRUE)),
+      position = pos
+    )
+
+    out[[pos]] <- list(
+      n = n,
+      spearman_jj = spearman_jj,
+      spearman_baseline = spearman_baseline,
+      top_k = top_k,
+      cumulative_lift = cumulative_lift_rows
+    )
+  }
+  out
 }
 
 
@@ -232,13 +308,11 @@ score_correlations <- function(scored) {
     out[[pos]] <- tibble(
       position = pos,
       n_total = nrow(df), n_with_zap = nrow(df_zap),
-      cor_baseline = cor(df$baseline_score, df$best_ffppg),
-      cor_zap = if (nrow(df_zap) >= 5) cor(df_zap$zap_score, df_zap$best_ffppg)
-                else NA_real_,
-      slope_baseline = coef(lm(best_ffppg ~ baseline_score, data = df))[2],
-      slope_zap = if (nrow(df_zap) >= 5)
-                    coef(lm(best_ffppg ~ zap_score, data = df_zap))[2]
-                  else NA_real_
+      pearson_jj = cor(df$jj_score, df$best_ffppg),
+      pearson_baseline = cor(df$baseline_score, df$best_ffppg),
+      pearson_zap_only_2024_25 = if (nrow(df_zap) >= 5)
+                                    cor(df_zap$zap_score, df_zap$best_ffppg)
+                                  else NA_real_
     )
   }
   dplyr::bind_rows(out)
@@ -254,9 +328,9 @@ score_correlations <- function(scored) {
 # Returns a tibble of per-player gaps + a summary by bump magnitude bucket.
 jj_bump_analysis <- function(scored, late_round_only = FALSE) {
   df <- scored |>
-    dplyr::filter(!is.na(zap_score), !is.na(baseline_score)) |>
+    dplyr::filter(!is.na(jj_score), !is.na(baseline_score)) |>
     dplyr::mutate(
-      bump = zap_score - baseline_score,
+      bump = jj_score - baseline_score,
       bump_bucket = dplyr::case_when(
         bump >=  30 ~ "Big JJ bump (+30 or more)",
         bump >=  10 ~ "Moderate JJ bump (+10 to +30)",
