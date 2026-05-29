@@ -71,6 +71,15 @@ def _get_rookies(rank_col: str, blend_weights: dict | None = None) -> pd.DataFra
     rookies[["blended_rank", "rank_spread", "source_high", "source_low"]] = \
         rookies.apply(_row, axis=1)
 
+    # Fill unranked (None/NaN) per-source ranks with (max + 1) so they sort to the
+    # BOTTOM of a column-sorted table — Streamlit sorts nulls to the top otherwise.
+    # Done AFTER the blend/spread above so those reflect true source coverage.
+    for col in ["lr_rank", "fc_rookie_rank", "ktc_rookie_rank", "draft_skill_rank", "adp_rank"]:
+        if col in rookies.columns:
+            nums = pd.to_numeric(rookies[col], errors="coerce")
+            if nums.notna().any():
+                rookies[col] = nums.fillna(int(nums.max()) + 1)
+
     # Keep every rookie; sort by the chosen source with unranked players last so
     # ranking by a sparse source (e.g. LateRound) never hides available players.
     rookies = rookies.sort_values(rank_col, na_position="last").reset_index(drop=True)
