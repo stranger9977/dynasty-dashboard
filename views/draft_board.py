@@ -11,7 +11,7 @@ BOARD_COLS = ["name", "position", "team", "blended_rank", "adp_rank",
               "draft_skill_rank", "lr_rank", "fc_rookie_rank", "ktc_rookie_rank",
               "rank_spread", "age", "college"]
 
-DISAGREE_COLS = ["name", "position", "blended_rank", "lr_rank", "fc_rookie_rank",
+DISAGREE_COLS = ["name", "position", "team", "blended_rank", "lr_rank", "fc_rookie_rank",
                  "ktc_rookie_rank", "draft_skill_rank", "adp_rank", "rank_spread",
                  "source_high", "source_low"]
 
