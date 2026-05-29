@@ -1,4 +1,5 @@
-data/
+data/*
+!data/seed/
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
@@ -6,3 +7,5 @@ __pycache__/
 .env
 
 .worktrees/
+.DS_Store
+.pytest_cache/

@@ -1,5 +1,8 @@
 import streamlit as st
 
+from ingestion.seed import ensure_data_from_seed
+ensure_data_from_seed()
+
 from components.sidebar import render_sidebar
 
 st.set_page_config(page_title="Dynasty Dashboard", layout="wide", page_icon="\U0001f3c8")
@@ -21,4 +24,16 @@ else:
         render()
     elif selected_tool == "Trade History":
         from views.trade_history import render
+        render()
+    elif selected_tool == "Start/Sit History":
+        from views.start_sit import render
+        render()
+    elif selected_tool == "Waiver History":
+        from views.waiver_history import render
+        render()
+    elif selected_tool == "Value Over Replacement":
+        from views.value_over_replacement import render
+        render()
+    elif selected_tool == "Manager War":
+        from views.manager_war import render
         render()
