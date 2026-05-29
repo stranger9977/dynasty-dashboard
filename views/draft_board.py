@@ -84,6 +84,9 @@ def render_sortable_board(rookies: pd.DataFrame):
 def render_disagreements(rookies: pd.DataFrame, n: int = 15):
     st.markdown("#### Biggest Disagreements")
     st.caption("Sorted by spread across LR / FC / KTC / Draft / ADP — value or trap")
+    if "rank_spread" not in rookies.columns:
+        st.info("Disagreement spread unavailable.")
+        return
     d = rookies[rookies["rank_spread"].notna()].sort_values("rank_spread", ascending=False).head(n)
     cols = [c for c in DISAGREE_COLS if c in d.columns]
     st.dataframe(d[cols], use_container_width=True, hide_index=True,
