@@ -46,18 +46,37 @@ def render_sidebar() -> str:
 
         st.sidebar.markdown("---")
 
-    tool = st.sidebar.radio("Tool", ["Ranking Comparison", "Waiver Wire", "Draft Wizard", "Trade History"], label_visibility="collapsed", key="selected_tool")
+    tool = st.sidebar.radio(
+        "Tool",
+        ["Ranking Comparison", "Waiver Wire", "Draft Wizard", "Trade History",
+         "Start/Sit History", "Waiver History", "Value Over Replacement", "Manager War"],
+        label_visibility="collapsed",
+        key="selected_tool",
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Data")
 
-    # Show last refresh time
-    if MERGED_PARQUET.exists():
-        mtime = os.path.getmtime(MERGED_PARQUET)
-        ts = datetime.fromtimestamp(mtime).strftime("%b %d, %Y %I:%M %p")
-        st.sidebar.caption(f"Last refresh: {ts}")
-    else:
-        st.sidebar.warning("No data yet — click Refresh Data")
+    from config import FC_PARQUET, KTC_PARQUET, NFL_DRAFT_PARQUET, ADP_CSV
+    from ingestion.lateround import LATEROUND_CSV
+
+    def _fresh(path, label):
+        if path.exists():
+            ts = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%b %d %I:%M%p")
+            try:
+                import pandas as pd
+                n = len(pd.read_parquet(path)) if str(path).endswith(".parquet") else len(pd.read_csv(path))
+            except Exception:
+                n = "?"
+            st.sidebar.caption(f"{label}: {n} · {ts}")
+        else:
+            st.sidebar.caption(f"{label}: — (none)")
+
+    _fresh(FC_PARQUET, "FantasyCalc")
+    _fresh(KTC_PARQUET, "KeepTradeCut")
+    _fresh(LATEROUND_CSV, "LateRound")
+    _fresh(NFL_DRAFT_PARQUET, "NFL Draft")
+    _fresh(ADP_CSV, "ADP")
 
     if st.sidebar.button("Refresh Data", use_container_width=True):
         _refresh_data()
@@ -82,6 +101,16 @@ def _refresh_data():
         kt = fetch_ktc()
         kt.to_parquet(KTC_PARQUET, index=False)
         st.write(f"KeepTradeCut: {len(kt)} players")
+
+        st.write("Fetching NFL draft capital...")
+        try:
+            from ingestion.nfl_draft import fetch_nfl_draft
+            from config import NFL_DRAFT_PARQUET
+            nd = fetch_nfl_draft()
+            nd.to_parquet(NFL_DRAFT_PARQUET, index=False)
+            st.write(f"NFL draft: {len(nd)} skill picks")
+        except Exception as e:
+            st.write(f"NFL draft fetch failed — keeping existing ({e})")
 
         st.write("Matching players...")
         merged = merge_rankings(fc, kt)
