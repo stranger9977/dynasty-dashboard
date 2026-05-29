@@ -11,6 +11,7 @@ def test_get_rookies_has_all_source_ranks_and_blend():
         assert col in df.columns, col
     assert df.iloc[0]["blended_rank"] is not None
     assert df["rank_spread"].notna().any()
+    assert "source_high" in df.columns and "source_low" in df.columns
 
 
 def test_rank_sources_resolve_to_columns():

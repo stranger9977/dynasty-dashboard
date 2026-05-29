@@ -348,14 +348,23 @@ Use the **Rank by** setting in the sidebar to change which source drives the sor
     rank_col = RANK_SOURCES[source_label]
 
     st.sidebar.markdown("**Blend Weights**")
-    w_lr = st.sidebar.slider("LateRound %", 0, 100, 50, 5, key="dw_w_lr")
-    w_fc = st.sidebar.slider("FantasyCalc %", 0, 100, 25, 5, key="dw_w_fc")
-    w_ktc = st.sidebar.slider("KeepTradeCut %", 0, 100, 25, 5, key="dw_w_ktc")
-    total_w = w_lr + w_fc + w_ktc
+    w_lr = st.sidebar.slider("LateRound %", 0, 100, 20, 5, key="dw_w_lr")
+    w_fc = st.sidebar.slider("FantasyCalc %", 0, 100, 20, 5, key="dw_w_fc")
+    w_ktc = st.sidebar.slider("KeepTradeCut %", 0, 100, 20, 5, key="dw_w_ktc")
+    w_draft = st.sidebar.slider("NFL Draft %", 0, 100, 20, 5, key="dw_w_draft")
+    w_adp = st.sidebar.slider("ADP %", 0, 100, 20, 5, key="dw_w_adp")
+    total_w = w_lr + w_fc + w_ktc + w_draft + w_adp
     if total_w == 0:
         total_w = 1
-    blend_weights = {"lr": w_lr / total_w, "fc": w_fc / total_w, "ktc": w_ktc / total_w}
-    st.sidebar.caption(f"Effective: LR {blend_weights['lr']:.0%} / FC {blend_weights['fc']:.0%} / KTC {blend_weights['ktc']:.0%}")
+    blend_weights = {
+        "lr": w_lr / total_w, "fc": w_fc / total_w, "ktc": w_ktc / total_w,
+        "draft": w_draft / total_w, "adp": w_adp / total_w,
+    }
+    st.sidebar.caption(
+        f"Effective: LR {blend_weights['lr']:.0%} / FC {blend_weights['fc']:.0%} / "
+        f"KTC {blend_weights['ktc']:.0%} / Draft {blend_weights['draft']:.0%} / "
+        f"ADP {blend_weights['adp']:.0%}"
+    )
 
     # --- Manager rules ---
     st.sidebar.markdown("---")
