@@ -71,8 +71,9 @@ def _get_rookies(rank_col: str, blend_weights: dict | None = None) -> pd.DataFra
     rookies[["blended_rank", "rank_spread", "source_high", "source_low"]] = \
         rookies.apply(_row, axis=1)
 
-    rookies = rookies[rookies[rank_col].notna()]
-    rookies = rookies.sort_values(rank_col).reset_index(drop=True)
+    # Keep every rookie; sort by the chosen source with unranked players last so
+    # ranking by a sparse source (e.g. LateRound) never hides available players.
+    rookies = rookies.sort_values(rank_col, na_position="last").reset_index(drop=True)
     return rookies
 
 
@@ -230,7 +231,7 @@ def _smart_auto_pick(available: pd.DataFrame, owner_name: str, rank_col: str,
                       current_round_pick: int = 0) -> pd.Series:
     """Pick a player accounting for positional need, rules, and randomness."""
     if available.empty:
-        return available.iloc[0]
+        return None
 
     # Check for forced pick rules first ("will draft player at pick")
     if draft_rules:
