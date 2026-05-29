@@ -559,40 +559,52 @@ Use the **Rank by** setting in the sidebar to change which source drives the sor
 
     rookies = _get_rookies(rank_col, blend_weights)
 
-    # --- Tabs ---
+    # Live availability for the first-page cards/board
+    available = rookies
+    if draft and draft.get("draft_id"):
+        available = _available_after_live_picks(rookies, draft["draft_id"])
+
     tab_board, tab_mock = st.tabs(["Draft Board", "Mock Draft Simulator"])
 
     with tab_board:
-        _render_draft_board(rookies, rank_col, source_label)
+        _render_draft_board(rookies, available, rank_col, source_label, draft)
 
     with tab_mock:
-        _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, user_slot, rules)
+        _render_mock_draft(rookies, draft_order, rank_col, num_teams,
+                           num_rounds, user_slot, rules)
 
 
-def _render_draft_board(rookies: pd.DataFrame, rank_col: str, source_label: str):
-    st.subheader("Rookie Rankings")
-    st.caption(f"Sorted by {source_label}")
+def _render_draft_board(rookies, available, rank_col, source_label, draft):
+    from views.draft_board import (render_best_available_cards,
+                                   render_sortable_board, render_disagreements)
 
-    pos_tabs = st.tabs(["All"] + POSITIONS)
+    # Mobile-first controls in the main pane (not the sidebar drawer)
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        top_n = st.radio("Cards per position", [2, 3], horizontal=True,
+                         index=0, key="dw_top_n")
+    with c2:
+        if draft and draft.get("draft_id"):
+            if st.button("↻ Refresh picks", use_container_width=True):
+                from ingestion.sleeper import get_draft_picks
+                get_draft_picks.clear()
+                st.rerun()
 
-    display_cols = [
-        "name", "position", "team",
-        "blended_rank", "lr_rank", "fc_rookie_rank", "ktc_rookie_rank",
-        "lr_tier", "fc_tier", "ktc_tier",
-        "fc_value", "ktc_value", "age", "college",
-    ]
-    available_cols = [c for c in display_cols if c in rookies.columns]
+    n_taken = len(rookies) - len(available)
+    if draft and draft.get("draft_id"):
+        st.caption(f"Live: {n_taken} drafted · {len(available)} available · sorted by {source_label}")
+    else:
+        st.caption(f"No live draft connected — showing overall best available · sorted by {source_label}")
 
-    col_config = _col_config()
+    render_best_available_cards(available, rank_col, top_n=top_n)
 
-    for tab, pos_filter in zip(pos_tabs, [None] + POSITIONS):
-        with tab:
-            tab_df = rookies if pos_filter is None else rookies[rookies["position"] == pos_filter]
-            st.dataframe(
-                tab_df[available_cols],
-                use_container_width=True, hide_index=True,
-                column_config=col_config,
-            )
+    st.markdown("---")
+    pos_filter = st.radio("Position", ["All"] + POSITIONS, horizontal=True, key="dw_board_pos")
+    board = available if pos_filter == "All" else available[available["position"] == pos_filter]
+    render_sortable_board(board)
+
+    st.markdown("---")
+    render_disagreements(available)
 
 
 def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, user_slot, rules):
