@@ -40,16 +40,17 @@ def _board_col_config():
     }
 
 
-def _player_card(p: pd.Series):
+def _card_html(p: pd.Series) -> str:
+    """One best-available card as an HTML string sized to flex/wrap responsively."""
     color = POS_COLORS.get(p["position"], "#666")
     age = f"{p['age']:.1f}" if pd.notna(p.get("age")) else "—"
     draft = f"{_fmt(p.get('draft_skill_rank'))} (pk {_fmt(p.get('draft_overall_pick'))})"
     note = ""
     if pd.notna(p.get("source_high")) and pd.notna(p.get("source_low")):
         note = f"{p['source_high']} loves / {p['source_low']} fades"
-    st.markdown(
-        f"<div style='border:1px solid #444;border-left:5px solid {color};"
-        f"border-radius:8px;padding:8px 10px;margin:3px 0;background:#1a1a2e'>"
+    return (
+        f"<div style='flex:1 1 240px;border:1px solid #444;border-left:5px solid {color};"
+        f"border-radius:8px;padding:8px 10px;background:#1a1a2e'>"
         f"<div style='font-weight:bold'>{p['name']}</div>"
         f"<div style='font-size:0.72em;color:#aaa'>{p['position']} · {p.get('team','')} · "
         f"age {age} · {p.get('college','') or ''}</div>"
@@ -59,7 +60,8 @@ def _player_card(p: pd.Series):
         f"FC {_fmt(p.get('fc_rookie_rank'))} · KTC {_fmt(p.get('ktc_rookie_rank'))} · "
         f"spread {_fmt(p.get('rank_spread'))}</div>"
         f"<div style='font-size:0.68em;color:#888'>{note}</div>"
-        f"</div>", unsafe_allow_html=True)
+        f"</div>"
+    )
 
 
 def render_best_available_cards(available: pd.DataFrame, rank_col: str, top_n: int = 2):
@@ -68,11 +70,14 @@ def render_best_available_cards(available: pd.DataFrame, rank_col: str, top_n: i
         pool = available[available["position"] == pos].sort_values(rank_col).head(top_n)
         if pool.empty:
             continue
-        st.caption(pos)
-        cols = st.columns(len(pool))
-        for col, (_, p) in zip(cols, pool.iterrows()):
-            with col:
-                _player_card(p)
+        # One flex-wrap row per position: cards stack 1-up on phones, multi-up on
+        # wider screens (flex-basis 240px), so it reads well on mobile.
+        cards = "".join(_card_html(p) for _, p in pool.iterrows())
+        st.markdown(
+            f"<div style='font-size:0.8em;color:#9aa;margin:8px 0 2px'>{pos}</div>"
+            f"<div style='display:flex;flex-wrap:wrap;gap:8px'>{cards}</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_sortable_board(rookies: pd.DataFrame):

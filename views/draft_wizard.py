@@ -800,79 +800,62 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
 POS_COLORS = {"QB": "#e41a1c", "RB": "#377eb8", "WR": "#4daf4a", "TE": "#ff7f00"}
 
 
+def _board_row_html(rd, rp, owner, is_user, is_traded, original, pick) -> str:
+    """One full-width draft-board row (mobile-friendly), shown in draft order."""
+    lb = "#4CAF50" if is_user else "#444"
+    via = f" <span style='color:#777'>via {original}</span>" if is_traded else ""
+    if pick:
+        pos = pick.get("player_pos", "")
+        color = POS_COLORS.get(pos, "#666")
+        rank = pick.get("player_rank")
+        rstr = f"#{rank:.0f}" if rank else ""
+        right = (f"<b style='color:{color}'>{pick.get('player', '')}</b>"
+                 f" <span style='color:#888;font-size:0.85em'>{pos} {rstr}</span>")
+        bg = "#1a1a2e"
+    else:
+        right = "<span style='color:#666'>—</span>"
+        bg = "#111"
+    return (
+        f"<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;"
+        f"border-left:4px solid {lb};background:{bg};border-radius:6px;padding:5px 9px;margin:2px 0'>"
+        f"<span style='color:#9aa;font-size:0.78em;white-space:nowrap'>{rd}.{rp} · {owner}{via}</span>"
+        f"<span style='font-size:0.9em;text-align:right'>{right}</span></div>"
+    )
+
+
 def _render_draft_board_grid(draft_order: list[dict], picks: list[dict],
                               num_teams: int, num_rounds: int,
                               on_pick_click: tuple | None = None):
-    """Render a grid-style draft board like the Sleeper UI.
-
-    on_pick_click: (round, round_pick) of the user's on-the-clock pick. That tile
-    renders as a button that toggles the best-available cards (`dw_best_avail_open`).
-    """
-    # Build a lookup: (round, round_pick) -> pick data
-    pick_map = {}
-    for p in picks:
-        pick_map[(p["round"], p["round_pick"])] = p
-
-    # Build order lookup for owner names
-    order_map = {}
-    for p in draft_order:
-        order_map[(p["round"], p["round_pick"])] = p
+    """Mobile-friendly vertical draft board: rounds as headers, picks as full-width
+    rows in draft order (snake-aware). The user's on-the-clock pick (on_pick_click)
+    renders as a button toggling the best-available cards (`dw_best_avail_open`)."""
+    pick_map = {(p["round"], p["round_pick"]): p for p in picks}
+    order_map = {(p["round"], p["round_pick"]): p for p in draft_order}
 
     for rd in range(1, num_rounds + 1):
         st.markdown(f"**Round {rd}**")
-        cols = st.columns(min(num_teams, 4))
+        buffer: list[str] = []  # batch HTML rows; flush around the clickable button
+        for rp in range(1, num_teams + 1):
+            info = order_map.get((rd, rp), {})
+            owner = info.get("owner", f"Slot {rp}")
+            is_user = info.get("is_user", False)
+            is_traded = info.get("is_traded", False)
+            original = info.get("original_owner", "")
+            pick = pick_map.get((rd, rp))
 
-        for i in range(num_teams):
-            col = cols[i % len(cols)]
-            slot_info = order_map.get((rd, i + 1), {})
-            owner = slot_info.get("owner", f"Slot {i+1}")
-            is_user = slot_info.get("is_user", False)
-            is_traded = slot_info.get("is_traded", False)
-            original = slot_info.get("original_owner", "")
-
-            pick_data = pick_map.get((rd, i + 1))
-
-            with col:
-                if pick_data:
-                    # Filled pick
-                    pos = pick_data.get("player_pos", "")
-                    color = POS_COLORS.get(pos, "#666")
-                    player = pick_data.get("player", "")
-                    rank = pick_data.get("player_rank")
-                    rank_str = f"#{rank:.0f}" if rank else ""
-
-                    border = "2px solid #4CAF50" if is_user else "1px solid #444"
-                    via = f"<br><span style='font-size:0.65em;color:#888'>via {original}</span>" if is_traded else ""
-
-                    st.markdown(
-                        f"<div style='border:{border};border-radius:8px;padding:6px 8px;margin:2px 0;"
-                        f"background:#1a1a2e;min-height:70px'>"
-                        f"<div style='font-size:0.7em;color:#aaa'>{rd}.{i+1} — {owner}{via}</div>"
-                        f"<div style='font-size:0.9em;font-weight:bold;color:{color}'>{player}</div>"
-                        f"<div style='font-size:0.7em;color:#888'>{pos} {rank_str}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                elif on_pick_click is not None and (rd, i + 1) == on_pick_click:
-                    # User's on-the-clock pick — clickable tile that toggles the
-                    # best-available-by-position cards below the grid.
-                    is_open = st.session_state.get("dw_best_avail_open", True)
-                    label = f"🎯 {rd}.{i+1} YOU — " + ("hide best avail" if is_open else "best available")
-                    if st.button(label, key=f"dw_picktile_{rd}_{i+1}", use_container_width=True):
-                        st.session_state["dw_best_avail_open"] = not is_open
-                        st.rerun()
-                else:
-                    # Empty pick
-                    border = "2px dashed #4CAF50" if is_user else "1px dashed #333"
-                    via = f"<br><span style='font-size:0.65em;color:#888'>via {original}</span>" if is_traded else ""
-
-                    st.markdown(
-                        f"<div style='border:{border};border-radius:8px;padding:6px 8px;margin:2px 0;"
-                        f"background:#111;min-height:70px'>"
-                        f"<div style='font-size:0.7em;color:#555'>{rd}.{i+1} — {owner}{via}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
+            if pick is None and on_pick_click is not None and (rd, rp) == on_pick_click:
+                if buffer:
+                    st.markdown("".join(buffer), unsafe_allow_html=True)
+                    buffer = []
+                is_open = st.session_state.get("dw_best_avail_open", True)
+                label = f"🎯 {rd}.{rp} YOU — " + ("hide best avail" if is_open else "best available")
+                if st.button(label, key=f"dw_picktile_{rd}_{rp}", use_container_width=True):
+                    st.session_state["dw_best_avail_open"] = not is_open
+                    st.rerun()
+            else:
+                buffer.append(_board_row_html(rd, rp, owner, is_user, is_traded, original, pick))
+        if buffer:
+            st.markdown("".join(buffer), unsafe_allow_html=True)
 
 
 def _render_your_haul(picks: list[dict]):
