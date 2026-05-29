@@ -757,24 +757,15 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
     )
 
     st.markdown("**Best Available**")
+    from views.draft_board import render_best_available_cards, render_sortable_board
     pick_pos = st.radio("Filter", ["All"] + POSITIONS, horizontal=True, key="dw_pick_pos")
     if pick_pos != "All":
         pick_available = available[available["position"] == pick_pos]
     else:
         pick_available = available
 
-    pick_display = [
-        "name", "position", "team", rank_col, "lr_rank",
-        "fc_rookie_rank", "ktc_rookie_rank", "fc_value", "ktc_value", "age", "college",
-    ]
-    pick_display = list(dict.fromkeys(pick_display))
-    pick_avail_cols = [c for c in pick_display if c in pick_available.columns]
-
-    st.dataframe(
-        pick_available[pick_avail_cols].head(20),
-        use_container_width=True, hide_index=True,
-        column_config=_col_config(),
-    )
+    render_best_available_cards(pick_available, rank_col, top_n=3)
+    render_sortable_board(pick_available.head(30))
 
     player_options = pick_available["name"].head(30).tolist()
     if player_options:
@@ -810,7 +801,7 @@ def _render_draft_board_grid(draft_order: list[dict], picks: list[dict],
 
     for rd in range(1, num_rounds + 1):
         st.markdown(f"**Round {rd}**")
-        cols = st.columns(min(num_teams, 6))
+        cols = st.columns(min(num_teams, 4))
 
         for i in range(num_teams):
             col = cols[i % len(cols)]
@@ -889,7 +880,6 @@ def _col_config():
         "ktc_rookie_rank": st.column_config.NumberColumn("KTC#", format="%d"),
         "fc_value": st.column_config.NumberColumn("FC Val", format="%d"),
         "ktc_value": st.column_config.NumberColumn("KTC Val", format="%d"),
-        "lr_tier": st.column_config.NumberColumn("LR Tier", format="%d"),
         "fc_tier": st.column_config.NumberColumn("FC Tier", format="%d"),
         "ktc_tier": st.column_config.NumberColumn("KTC Tier", format="%d"),
         "age": st.column_config.NumberColumn("Age", format="%.1f"),
