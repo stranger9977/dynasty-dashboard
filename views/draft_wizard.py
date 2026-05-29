@@ -76,6 +76,30 @@ def _get_rookies(rank_col: str, blend_weights: dict | None = None) -> pd.DataFra
     return rookies
 
 
+def _available_after_live_picks(rookies: pd.DataFrame, draft_id: str) -> pd.DataFrame:
+    """Remove rookies already taken in the live Sleeper draft (by sleeper_id then name)."""
+    from ingestion.sleeper import get_draft_picks
+    from ingestion.match_util import normalize_name
+    try:
+        picks = get_draft_picks(draft_id)
+    except Exception:
+        return rookies
+    taken_ids, taken_names = set(), set()
+    for pk in picks or []:
+        if pk.get("player_id"):
+            taken_ids.add(str(pk["player_id"]))
+        md = pk.get("metadata") or {}
+        nm = f"{md.get('first_name','')} {md.get('last_name','')}".strip()
+        if nm:
+            taken_names.add(normalize_name(nm))
+    if "sleeper_id" in rookies.columns:
+        mask_id = rookies["sleeper_id"].astype(str).isin(taken_ids)
+    else:
+        mask_id = pd.Series(False, index=rookies.index)
+    mask_name = rookies["name"].apply(lambda n: normalize_name(n) in taken_names)
+    return rookies[~(mask_id | mask_name)].copy()
+
+
 def _build_draft_order_from_sleeper(draft: dict, user_id: str | None,
                                      league_users: dict[str, str],
                                      traded_picks: list[dict] | None = None) -> list[dict]:

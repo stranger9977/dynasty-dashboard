@@ -1,7 +1,7 @@
 import requests
 import streamlit as st
 
-from config import SLEEPER_API, CURRENT_SEASON
+from config import SLEEPER_API, CURRENT_SEASON, DATA_DIR
 
 
 def get_user(username: str) -> dict | None:
@@ -104,7 +104,7 @@ def get_league_info(league_id: str) -> dict | None:
     }
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def get_draft_picks(draft_id: str) -> list[dict]:
     resp = requests.get(f"{SLEEPER_API}/draft/{draft_id}/picks", timeout=10)
     resp.raise_for_status()
@@ -118,6 +118,90 @@ def get_transactions(league_id: str, week: int) -> list[dict]:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+@st.cache_data(ttl=300)
+def get_matchups(league_id: str, week: int) -> list[dict]:
+    """Fetch matchup data for a league week.
+
+    Each entry contains roster_id, matchup_id, starters, players,
+    players_points (player_id -> fantasy points), and points (team total).
+    """
+    resp = requests.get(
+        f"{SLEEPER_API}/league/{league_id}/matchups/{week}", timeout=10
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_league_chain(league_id: str) -> list[dict]:
+    """Walk previous_league_id chain to get all seasons, oldest first."""
+    chain = []
+    current_id = league_id
+    seen = set()
+
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        info = get_league_info(current_id)
+        if info is None:
+            break
+        chain.append(info)
+        current_id = info.get("previous_league_id")
+
+    chain.reverse()  # oldest first
+    return chain
+
+
+def build_roster_to_manager(league_id: str) -> dict[int, str]:
+    """Map roster_id -> manager display_name for a league."""
+    rosters = get_rosters(league_id)
+    users = get_league_users(league_id)
+    mapping = {}
+    for r in rosters:
+        owner_id = r.get("owner_id")
+        name = users.get(owner_id, f"Team {r['roster_id']}")
+        mapping[r["roster_id"]] = name
+    return mapping
+
+
+def load_sleeper_players() -> dict[str, dict]:
+    """Fetch and cache the full Sleeper players list for name resolution.
+
+    Returns {sleeper_id: {name, position}} for all NFL players.
+    Cached to disk for 7 days since this is a ~30MB download.
+    """
+    import json
+    from datetime import datetime, timedelta
+
+    cache_path = DATA_DIR / "sleeper_players.json"
+
+    if cache_path.exists():
+        mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
+        if datetime.now() - mtime < timedelta(days=7):
+            with open(cache_path) as f:
+                return json.load(f)
+
+    try:
+        resp = requests.get(f"{SLEEPER_API}/players/nfl", timeout=60)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception:
+        return {}
+
+    players = {}
+    for pid, p in raw.items():
+        name = p.get("full_name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+        if name:
+            players[pid] = {
+                "name": name,
+                "position": p.get("position", ""),
+            }
+
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(cache_path, "w") as f:
+        json.dump(players, f)
+
+    return players
 
 
 def build_ownership_map(league_id: str) -> dict[str, str]:
