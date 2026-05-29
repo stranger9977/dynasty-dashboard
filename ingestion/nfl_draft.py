@@ -24,7 +24,7 @@ def _compute_draft_ranks(raw: pd.DataFrame, season: int) -> pd.DataFrame:
     df = df.sort_values("pick").rename(
         columns={"pfr_player_name": "name", "pick": "draft_overall_pick"}
     )
-    df["draft_skill_rank"] = range(1, len(df) + 1)
+    df["draft_skill_rank"] = df["draft_overall_pick"].rank(method="first").astype(int)
     df["draft_pos_rank"] = (
         df.groupby("position")["draft_overall_pick"].rank(method="first").astype(int)
     )
@@ -43,7 +43,7 @@ def fetch_nfl_draft(season: int = CURRENT_SEASON) -> pd.DataFrame:
 
 def load_nfl_draft() -> pd.DataFrame:
     if not NFL_DRAFT_PARQUET.exists():
-        return pd.DataFrame()
+        return pd.DataFrame(columns=OUT_COLS)
     return pd.read_parquet(NFL_DRAFT_PARQUET)
 
 
