@@ -4,49 +4,72 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import MERGED_PARQUET, POSITIONS
+from config import MERGED_PARQUET, POSITIONS, BLEND_WEIGHTS_DEFAULT
 
 RANK_SOURCES = {
     "Blended (avg)": "blended_rank",
-    "FantasyCalc": "fc_rank",
-    "KeepTradeCut": "ktc_rank",
+    "ADP": "adp_rank",
+    "NFL Draft": "draft_skill_rank",
     "LateRound": "lr_rank",
+    "FantasyCalc": "fc_rookie_rank",
+    "KeepTradeCut": "ktc_rookie_rank",
 }
+
+SOURCE_RANK_COLS = {
+    "lr": "lr_rank", "fc": "fc_rookie_rank", "ktc": "ktc_rookie_rank",
+    "draft": "draft_skill_rank", "adp": "adp_rank",
+}
+SOURCE_LABELS = {"lr": "LR", "fc": "FC", "ktc": "KTC", "draft": "Draft", "adp": "ADP"}
 
 
 def _get_rookies(rank_col: str, blend_weights: dict | None = None) -> pd.DataFrame:
     from ingestion.lateround import load_lateround, merge_lateround
+    from ingestion.nfl_draft import load_nfl_draft, merge_nfl_draft
+    from ingestion.adp import load_adp, merge_adp
+    from ingestion.blend import blend_rank, rank_spread
 
     if blend_weights is None:
-        blend_weights = {"lr": 0.50, "fc": 0.25, "ktc": 0.25}
+        blend_weights = dict(BLEND_WEIGHTS_DEFAULT)
 
     df = pd.read_parquet(MERGED_PARQUET)
-    rookies = df[df["is_rookie"] == True].copy()
+    rookies = df[df["is_rookie"] == True].copy()  # noqa: E712
 
-    # Merge LateRound rankings
+    # LateRound (rank, not tier)
     lr = load_lateround()
     if not lr.empty:
         rookies = merge_lateround(rookies, lr)
+    for c in ("lr_rank", "lr_pos_rank", "lr_tier"):
+        if c not in rookies.columns:
+            rookies[c] = None
 
-    # Recompute blended rank using user-configured weights
-    def _weighted_rank(row):
-        sources = []
-        weights = []
-        if pd.notna(row.get("lr_rank")) and blend_weights["lr"] > 0:
-            sources.append(row["lr_rank"])
-            weights.append(blend_weights["lr"])
-        if pd.notna(row.get("fc_rank")) and blend_weights["fc"] > 0:
-            sources.append(row["fc_rank"])
-            weights.append(blend_weights["fc"])
-        if pd.notna(row.get("ktc_rank")) and blend_weights["ktc"] > 0:
-            sources.append(row["ktc_rank"])
-            weights.append(blend_weights["ktc"])
-        if not sources:
-            return None
-        total_w = sum(weights)
-        return sum(s * w / total_w for s, w in zip(sources, weights))
+    # NFL draft capital + ADP
+    rookies = merge_nfl_draft(rookies, load_nfl_draft())
+    rookies = merge_adp(rookies, load_adp())
 
-    rookies["blended_rank"] = rookies.apply(_weighted_rank, axis=1)
+    # Rookie-only FC/KTC ranks (comparable to LR/Draft/ADP ranks)
+    for src, col in [("fc", "fc_rank"), ("ktc", "ktc_rank")]:
+        rookie_col = f"{src}_rookie_rank"
+        subset = rookies[rookies[col].notna()].sort_values(col)
+        rookies[rookie_col] = None
+        rookies.loc[subset.index, rookie_col] = range(1, len(subset) + 1)
+
+    # Equal-weight blend + disagreement spread
+    def _row(r):
+        sr = {}
+        for k, c in SOURCE_RANK_COLS.items():
+            v = r.get(c)
+            sr[k] = float(v) if pd.notna(v) else None
+        b = blend_rank(sr, blend_weights)
+        sp, hi, lo = rank_spread(sr)
+        return pd.Series({
+            "blended_rank": b,
+            "rank_spread": sp,
+            "source_high": SOURCE_LABELS.get(hi),
+            "source_low": SOURCE_LABELS.get(lo),
+        })
+
+    rookies[["blended_rank", "rank_spread", "source_high", "source_low"]] = \
+        rookies.apply(_row, axis=1)
 
     rookies = rookies[rookies[rank_col].notna()]
     rookies = rookies.sort_values(rank_col).reset_index(drop=True)
@@ -521,7 +544,7 @@ def _render_draft_board(rookies: pd.DataFrame, rank_col: str, source_label: str)
 
     display_cols = [
         "name", "position", "team",
-        "blended_rank", "lr_rank", "fc_rank", "ktc_rank",
+        "blended_rank", "lr_rank", "fc_rookie_rank", "ktc_rookie_rank",
         "lr_tier", "fc_tier", "ktc_tier",
         "fc_value", "ktc_value", "age", "college",
     ]
@@ -697,7 +720,7 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
 
     pick_display = [
         "name", "position", "team", rank_col, "lr_rank",
-        "fc_rank", "ktc_rank", "fc_value", "ktc_value", "age", "college",
+        "fc_rookie_rank", "ktc_rookie_rank", "fc_value", "ktc_value", "age", "college",
     ]
     pick_display = list(dict.fromkeys(pick_display))
     pick_avail_cols = [c for c in pick_display if c in pick_available.columns]
@@ -817,8 +840,8 @@ def _col_config():
         "team": st.column_config.TextColumn("Team", width="small"),
         "blended_rank": st.column_config.NumberColumn("Blended#", format="%.0f"),
         "lr_rank": st.column_config.NumberColumn("LR#", format="%d"),
-        "fc_rank": st.column_config.NumberColumn("FC#", format="%d"),
-        "ktc_rank": st.column_config.NumberColumn("KTC#", format="%d"),
+        "fc_rookie_rank": st.column_config.NumberColumn("FC#", format="%d"),
+        "ktc_rookie_rank": st.column_config.NumberColumn("KTC#", format="%d"),
         "fc_value": st.column_config.NumberColumn("FC Val", format="%d"),
         "ktc_value": st.column_config.NumberColumn("KTC Val", format="%d"),
         "lr_tier": st.column_config.NumberColumn("LR Tier", format="%d"),
