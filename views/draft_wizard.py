@@ -747,8 +747,9 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
             _render_draft_board_grid(draft_order, picks, num_teams, num_rounds)
             return
 
-    # --- Draft board grid ---
-    _render_draft_board_grid(draft_order, picks, num_teams, num_rounds)
+    # --- Draft board grid (tap your 🎯 pick tile to toggle best available) ---
+    _render_draft_board_grid(draft_order, picks, num_teams, num_rounds,
+                             on_pick_click=(current_pick["round"], current_pick["round_pick"]))
 
     # --- User's turn ---
     st.markdown("---")
@@ -757,7 +758,6 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
         f"Pick {current_pick['round_pick']} (#{current_pick['pick']} overall)"
     )
 
-    st.markdown("**Best Available**")
     from views.draft_board import render_best_available_cards, render_sortable_board
     pick_pos = st.radio("Filter", ["All"] + POSITIONS, horizontal=True, key="dw_pick_pos")
     if pick_pos != "All":
@@ -765,7 +765,11 @@ def _render_mock_draft(rookies, draft_order, rank_col, num_teams, num_rounds, us
     else:
         pick_available = available
 
-    render_best_available_cards(pick_available, rank_col, top_n=3)
+    if st.session_state.get("dw_best_avail_open", True):
+        render_best_available_cards(pick_available, rank_col, top_n=3)
+    else:
+        st.caption("Tap your 🎯 pick tile above to show best available by position.")
+
     render_sortable_board(pick_available.head(30))
 
     player_options = pick_available["name"].head(30).tolist()
@@ -788,8 +792,13 @@ POS_COLORS = {"QB": "#e41a1c", "RB": "#377eb8", "WR": "#4daf4a", "TE": "#ff7f00"
 
 
 def _render_draft_board_grid(draft_order: list[dict], picks: list[dict],
-                              num_teams: int, num_rounds: int):
-    """Render a grid-style draft board like the Sleeper UI."""
+                              num_teams: int, num_rounds: int,
+                              on_pick_click: tuple | None = None):
+    """Render a grid-style draft board like the Sleeper UI.
+
+    on_pick_click: (round, round_pick) of the user's on-the-clock pick. That tile
+    renders as a button that toggles the best-available cards (`dw_best_avail_open`).
+    """
     # Build a lookup: (round, round_pick) -> pick data
     pick_map = {}
     for p in picks:
@@ -835,6 +844,14 @@ def _render_draft_board_grid(draft_order: list[dict], picks: list[dict],
                         f"</div>",
                         unsafe_allow_html=True,
                     )
+                elif on_pick_click is not None and (rd, i + 1) == on_pick_click:
+                    # User's on-the-clock pick — clickable tile that toggles the
+                    # best-available-by-position cards below the grid.
+                    is_open = st.session_state.get("dw_best_avail_open", True)
+                    label = f"🎯 {rd}.{i+1} YOU — " + ("hide best avail" if is_open else "best available")
+                    if st.button(label, key=f"dw_picktile_{rd}_{i+1}", use_container_width=True):
+                        st.session_state["dw_best_avail_open"] = not is_open
+                        st.rerun()
                 else:
                     # Empty pick
                     border = "2px dashed #4CAF50" if is_user else "1px dashed #333"
