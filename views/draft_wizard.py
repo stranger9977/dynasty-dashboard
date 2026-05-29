@@ -867,21 +867,3 @@ def _render_your_haul(picks: list[dict]):
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-
-
-def _col_config():
-    return {
-        "name": st.column_config.TextColumn("Player", width="medium"),
-        "position": st.column_config.TextColumn("Pos", width="small"),
-        "team": st.column_config.TextColumn("Team", width="small"),
-        "blended_rank": st.column_config.NumberColumn("Blended#", format="%.0f"),
-        "lr_rank": st.column_config.NumberColumn("LR#", format="%d"),
-        "fc_rookie_rank": st.column_config.NumberColumn("FC#", format="%d"),
-        "ktc_rookie_rank": st.column_config.NumberColumn("KTC#", format="%d"),
-        "fc_value": st.column_config.NumberColumn("FC Val", format="%d"),
-        "ktc_value": st.column_config.NumberColumn("KTC Val", format="%d"),
-        "fc_tier": st.column_config.NumberColumn("FC Tier", format="%d"),
-        "ktc_tier": st.column_config.NumberColumn("KTC Tier", format="%d"),
-        "age": st.column_config.NumberColumn("Age", format="%.1f"),
-        "college": st.column_config.TextColumn("College"),
-    }
