@@ -18,3 +18,17 @@ def test_rank_sources_resolve_to_columns():
     df = _get_rookies("blended_rank")
     for label, col in RANK_SOURCES.items():
         assert col in df.columns, f"{label}->{col}"
+
+
+def test_get_rookies_keeps_raw_source_ranks():
+    df = _get_rookies("blended_rank")
+    for col in ["lr_rank", "fc_rookie_rank", "ktc_rookie_rank",
+                "draft_skill_rank", "adp_rank"]:
+        assert f"{col}__raw" in df.columns, f"{col}__raw"
+    filled = pd.to_numeric(df["lr_rank"], errors="coerce")
+    raw = pd.to_numeric(df["lr_rank__raw"], errors="coerce")
+    # where raw has a value it equals the (pre-fill) value
+    both = raw.notna()
+    assert (raw[both] == filled[both]).all()
+    # the fill changed something: some cells are filled numbers but raw is NaN
+    assert (filled.notna() & raw.isna()).any()

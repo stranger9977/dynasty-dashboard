@@ -71,6 +71,14 @@ def _get_rookies(rank_col: str, blend_weights: dict | None = None) -> pd.DataFra
     rookies[["blended_rank", "rank_spread", "source_high", "source_low"]] = \
         rookies.apply(_row, axis=1)
 
+    # Snapshot the TRUE (unfilled) per-source ranks so the Draft Recap can blend on
+    # real source coverage (None when a source doesn't rank a player), not the
+    # sort-sentinel written by the fill loop below.
+    for col in ["lr_rank", "fc_rookie_rank", "ktc_rookie_rank",
+                "draft_skill_rank", "adp_rank"]:
+        if col in rookies.columns:
+            rookies[f"{col}__raw"] = pd.to_numeric(rookies[col], errors="coerce")
+
     # Fill unranked (None/NaN) per-source ranks with (max + 1) so they sort to the
     # BOTTOM of a column-sorted table — Streamlit sorts nulls to the top otherwise.
     # Done AFTER the blend/spread above so those reflect true source coverage.
