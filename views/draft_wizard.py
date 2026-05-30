@@ -582,7 +582,8 @@ Use the **Rank by** setting in the sidebar to change which source drives the sor
     if draft and draft.get("draft_id"):
         available = _available_after_live_picks(rookies, draft["draft_id"])
 
-    tab_board, tab_mock = st.tabs(["Draft Board", "Mock Draft Simulator"])
+    tab_board, tab_mock, tab_recap = st.tabs(
+        ["Draft Board", "Mock Draft Simulator", "Draft Recap"])
 
     with tab_board:
         _render_draft_board(rookies, available, rank_col, source_label, draft)
@@ -590,6 +591,10 @@ Use the **Rank by** setting in the sidebar to change which source drives the sor
     with tab_mock:
         _render_mock_draft(rookies, draft_order, rank_col, num_teams,
                            num_rounds, user_slot, rules)
+
+    with tab_recap:
+        from views.draft_value import render_draft_value_recap
+        render_draft_value_recap(rookies, draft, st.session_state.get("league_id", ""))
 
 
 def _render_draft_board(rookies, available, rank_col, source_label, draft):

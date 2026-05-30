@@ -116,7 +116,7 @@ def _chip_html(title, manager, detail, color, avatar_url=None):
 
 
 def render_draft_value_recap(rookies, draft, league_id):
-    st.subheader("Draft Recap — Value by Manager")
+    st.markdown("### Draft Recap — Value by Manager")
 
     rows, source_label = [], "live draft"
     if draft and draft.get("draft_id"):
