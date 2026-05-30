@@ -41,3 +41,32 @@ def consensus_rank(source_ranks: dict, active, weights: dict | None = None):
     sr = {k: source_ranks.get(k) for k in active}
     w = {k: (weights.get(k, 1.0) if weights else 1.0) for k in active}
     return blend_rank(sr, w)
+
+
+def build_pick_values(picks: pd.DataFrame, lam: float, max_rank: float) -> pd.DataFrame:
+    """Add value columns to a picks table.
+
+    Required input columns: 'manager', 'player', 'position', 'pick_no',
+    'consensus_rank' (float or NaN). Adds 'unranked' (bool), 'player_value',
+    'slot_value', 'surplus'. A NaN consensus_rank is flagged unranked and filled
+    with max_rank + 1 (worst) so it scores ~0 value -> a pure reach."""
+    df = picks.copy()
+    df["unranked"] = df["consensus_rank"].isna()
+    filled = df["consensus_rank"].fillna(max_rank + 1)
+    df["player_value"] = filled.apply(lambda r: decay_value(r, lam))
+    df["slot_value"] = df["pick_no"].apply(lambda p: decay_value(p, lam))
+    df["surplus"] = df["player_value"] - df["slot_value"]
+    return df
+
+
+def summarize_managers(pick_values: pd.DataFrame) -> pd.DataFrame:
+    """Per-manager totals, indexed by manager and sorted by total_surplus desc.
+
+    Columns: 'total_surplus', 'num_picks', 'surplus_per_pick'."""
+    g = pick_values.groupby("manager")
+    out = pd.DataFrame({
+        "total_surplus": g["surplus"].sum(),
+        "num_picks": g["surplus"].size(),
+    })
+    out["surplus_per_pick"] = out["total_surplus"] / out["num_picks"]
+    return out.sort_values("total_surplus", ascending=False)
