@@ -30,3 +30,14 @@ def decay_value(rank, lam: float):
     if rank is None or pd.isna(rank):
         return None
     return 100.0 * math.exp(-lam * (float(rank) - 1.0))
+
+
+def consensus_rank(source_ranks: dict, active, weights: dict | None = None):
+    """Equal-weight (or weighted) blend of the *active* sources' ranks.
+
+    source_ranks: {key: rank or None}. active: iterable of source keys to include.
+    Returns the blended rank (float) or None if no active source has a value."""
+    active = set(active)
+    sr = {k: source_ranks.get(k) for k in active}
+    w = {k: (weights.get(k, 1.0) if weights else 1.0) for k in active}
+    return blend_rank(sr, w)
