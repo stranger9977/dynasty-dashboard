@@ -51,8 +51,11 @@ def build_pick_values(picks: pd.DataFrame, lam: float, max_rank: float) -> pd.Da
     'slot_value', 'surplus'. A NaN consensus_rank is flagged unranked and filled
     with max_rank + 1 (worst) so it scores ~0 value -> a pure reach."""
     df = picks.copy()
-    df["unranked"] = df["consensus_rank"].isna()
-    filled = df["consensus_rank"].fillna(max_rank + 1)
+    # Coerce to numeric first so an all-None consensus column (object dtype) doesn't
+    # trip pandas' deprecated object-downcast-on-fillna path.
+    consensus = pd.to_numeric(df["consensus_rank"], errors="coerce")
+    df["unranked"] = consensus.isna()
+    filled = consensus.fillna(max_rank + 1)
     df["player_value"] = filled.apply(lambda r: decay_value(r, lam))
     df["slot_value"] = df["pick_no"].apply(lambda p: decay_value(p, lam))
     df["surplus"] = df["player_value"] - df["slot_value"]

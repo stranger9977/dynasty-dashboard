@@ -182,19 +182,24 @@ def render_draft_value_recap(rookies, draft, league_id):
     # --- Manager chips ---
     st.markdown("---")
     hog = summary.index[0]       # highest total surplus
-    guys = summary.index[-1]     # lowest total surplus
     hog_pick = pv[pv["manager"] == hog].sort_values("surplus", ascending=False).iloc[0]
-    guys_pick = pv[pv["manager"] == guys].sort_values("surplus").iloc[0]
-    ch1, ch2 = st.columns(2)
-    with ch1:
-        st.markdown(_chip_html(
-            "🐷 Value Hog", hog,
-            f"+{summary.loc[hog, 'total_surplus']:.0f} total · "
-            f"best: {hog_pick['player']} ({hog_pick['surplus']:+.0f})",
-            "#4daf4a"), unsafe_allow_html=True)
-    with ch2:
-        st.markdown(_chip_html(
+    hog_html = _chip_html(
+        "🐷 Value Hog", hog,
+        f"+{summary.loc[hog, 'total_surplus']:.0f} total · "
+        f"best: {hog_pick['player']} ({hog_pick['surplus']:+.0f})",
+        "#4daf4a")
+    # Only contrast with "Gets His Guys" once more than one manager has picked —
+    # otherwise both chips would name the same person with opposite framing.
+    if len(summary) > 1:
+        guys = summary.index[-1]     # lowest total surplus
+        guys_pick = pv[pv["manager"] == guys].sort_values("surplus").iloc[0]
+        guys_html = _chip_html(
             "🎯 Gets His Guys — no matter what", guys,
             f"{summary.loc[guys, 'total_surplus']:.0f} total · "
             f"reach: {guys_pick['player']} ({guys_pick['surplus']:+.0f})",
-            "#e41a1c"), unsafe_allow_html=True)
+            "#e41a1c")
+        ch1, ch2 = st.columns(2)
+        ch1.markdown(hog_html, unsafe_allow_html=True)
+        ch2.markdown(guys_html, unsafe_allow_html=True)
+    else:
+        st.markdown(hog_html, unsafe_allow_html=True)
