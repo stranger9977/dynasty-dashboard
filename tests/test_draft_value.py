@@ -110,3 +110,14 @@ def test_summarize_aggregates_normalizes_and_sorts():
             s.loc[mgr, "total_surplus"] / s.loc[mgr, "num_picks"])
     # A (one even pick + one steal) outranks B (two reaches)
     assert s.index[0] == "A"
+
+
+def test_build_pick_values_does_not_mutate_input():
+    # The .copy() is load-bearing: callers pass frames derived from the
+    # source-agnostic rookie table and must not see value columns leak back.
+    lam = half_life_to_lambda(6)
+    original = _picks()
+    cols_before = list(original.columns)
+    build_pick_values(original, lam, max_rank=60)
+    assert list(original.columns) == cols_before
+    assert "surplus" not in original.columns
