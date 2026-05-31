@@ -21,6 +21,7 @@ FC_PARQUET = DATA_DIR / "fantasycalc.parquet"
 KTC_PARQUET = DATA_DIR / "ktc.parquet"
 MERGED_PARQUET = DATA_DIR / "merged.parquet"
 NFL_DRAFT_PARQUET = DATA_DIR / "nfl_draft.parquet"
+PROJECTIONS_PARQUET = DATA_DIR / "projections.parquet"
 ADP_CSV = DATA_DIR / "adp_rankings.csv"
 SEED_DIR = DATA_DIR / "seed"
 
