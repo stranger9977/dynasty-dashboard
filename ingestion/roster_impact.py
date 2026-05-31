@@ -29,6 +29,11 @@ def points_above_starters(baseline: pd.DataFrame, added: pd.DataFrame,
     A player who can't beat the worst starter at its position contributes 0; several
     additions at one position displace several starters correctly."""
     counts = counts or STARTER_COUNTS
-    combined = pd.concat([baseline, added], ignore_index=True)
+    if added.empty:
+        return 0.0
+    # Concat only non-empty frames so an empty baseline/added doesn't trip pandas'
+    # deprecated all-NA concatenation path.
+    frames = [f for f in (baseline, added) if not f.empty]
+    combined = pd.concat(frames, ignore_index=True)
     return (starter_points(combined, counts, score_col)
             - starter_points(baseline, counts, score_col))
