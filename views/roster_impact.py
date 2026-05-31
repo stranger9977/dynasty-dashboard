@@ -6,7 +6,7 @@ import streamlit as st
 
 from config import STARTER_COUNTS
 from ingestion.match_util import normalize_name
-from ingestion.roster_impact import points_above_starters, lineup_changes
+from ingestion.roster_impact import starter_points, points_above_starters, lineup_changes
 
 SCORE_OPTIONS = {"PPR": "pts_ppr", "Half PPR": "pts_half_ppr", "Standard": "pts_std"}
 
@@ -62,13 +62,8 @@ def render_roster_impact(rookies, draft, league_id):
     score_label = st.radio("Scoring", list(SCORE_OPTIONS), horizontal=True, key="ri_score")
     score_col = SCORE_OPTIONS[score_label]
 
-    drafted = _collect_drafted(rookies, draft, league_id)
-    if not drafted:
-        st.info("No draft picks yet — start your live draft or run a mock "
-                "in the Mock Draft Simulator.")
-        return
-
-    # baseline rosters (existing players), keyed by manager
+    # Current rosters (all managers), keyed by manager — used by the starter
+    # leaderboard and as draft baselines.
     roster_ids = {}
     if league_id:
         from ingestion.sleeper import get_rosters, build_roster_to_manager
@@ -82,6 +77,37 @@ def render_roster_impact(rookies, draft, league_id):
         if not ids:
             return pd.DataFrame({"player_id": [], "position": [], score_col: [], "name": []})
         return proj_idx.loc[ids, ["position", score_col, "name"]].reset_index()
+
+    # --- Projected Starter Leaderboard (current rosters, draft-independent) ---
+    if roster_ids:
+        st.markdown("#### 📊 Projected Starter Leaderboard")
+        st.caption(f"Highest projected starting lineups today — best "
+                   f"{STARTER_COUNTS['QB']} QB / {STARTER_COUNTS['RB']} RB / "
+                   f"{STARTER_COUNTS['WR']} WR / {STARTER_COUNTS['TE']} TE · "
+                   f"scoring {score_label}")
+        sl_rows = []
+        for mgr, ids in roster_ids.items():
+            rf = _frame(list(ids))
+            row = {"Manager": mgr}
+            for pos in ("QB", "RB", "WR", "TE"):
+                row[pos] = round(starter_points(rf, {pos: STARTER_COUNTS[pos]}, score_col), 1)
+            row["Total"] = round(starter_points(rf, STARTER_COUNTS, score_col), 1)
+            sl_rows.append(row)
+        sl = (pd.DataFrame(sl_rows).sort_values("Total", ascending=False)
+              .reset_index(drop=True))
+        sl.index = sl.index + 1
+        st.dataframe(sl, use_container_width=True, column_config={
+            c: st.column_config.NumberColumn(c, format="%.0f")
+            for c in ("QB", "RB", "WR", "TE", "Total")
+        })
+        st.markdown("---")
+
+    # --- Draft impact (needs picks) ---
+    drafted = _collect_drafted(rookies, draft, league_id)
+    if not drafted:
+        st.info("No draft picks yet — start your live draft or run a mock in the "
+                "Mock Draft Simulator to see draft impact.")
+        return
 
     rows, per_mgr, total_roster, matched_roster = [], {}, 0, 0
     for mgr, added_ids in drafted.items():
