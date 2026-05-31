@@ -101,3 +101,25 @@ def test_lineup_changes_deltas_sum_to_points_above_starters():
     res = lineup_changes(base, add, COUNTS, "pts")
     total = sum(p["delta"] for p in res.values())
     assert total == pytest.approx(points_above_starters(base, add, COUNTS, "pts"))
+
+
+def test_lineup_changes_individual_upgrades_credit_best_first():
+    base = _idf([("v1", "RB", 200, "VetA"), ("v2", "RB", 150, "VetB"),
+                 ("v3", "RB", 100, "VetC")])
+    add = _idf([("r1", "RB", 180, "Rook1"), ("r2", "RB", 160, "Rook2")])
+    rb = lineup_changes(base, add, COUNTS, "pts")["RB"]
+    assert rb["delta"] == pytest.approx(90)
+    ups = {u["player"]: u for u in rb["upgrades"]}
+    assert ups["Rook1"]["gain"] == pytest.approx(80)    # 180 − weakest bumped (VetC 100)
+    assert ups["Rook1"]["replaced"] == "VetC"
+    assert ups["Rook2"]["gain"] == pytest.approx(10)    # 160 − next bumped (VetB 150)
+    assert sum(u["gain"] for u in rb["upgrades"]) == pytest.approx(rb["delta"])
+
+
+def test_lineup_changes_open_slot_upgrade_is_full_points():
+    base = _idf([("v1", "QB", 300, "A")])               # only 1 QB, 2 start
+    add = _idf([("r1", "QB", 120, "R")])
+    qb = lineup_changes(base, add, COUNTS, "pts")["QB"]
+    assert len(qb["upgrades"]) == 1
+    assert qb["upgrades"][0]["replaced"] is None
+    assert qb["upgrades"][0]["gain"] == pytest.approx(120)

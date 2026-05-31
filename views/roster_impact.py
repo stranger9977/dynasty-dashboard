@@ -116,8 +116,37 @@ def render_roster_impact(rookies, draft, league_id):
         st.markdown("**Pts added above starters**")
         hbar(summary["above_starters"], "pts", color="#4daf4a")
 
+    # --- Top-10 individual lineup upgrades across the league ---
     st.markdown("---")
-    st.caption("Expand a manager for the per-slot change (↑ added / ↓ bumped) and their "
+    st.markdown("#### 🏆 Top 10 individual upgrades")
+    ups = []
+    for mgr in summary.index:
+        for pos, ch in per_mgr[mgr]["changes"].items():
+            for u in ch.get("upgrades", []):
+                if u["gain"] <= 0:
+                    continue
+                ups.append({
+                    "Manager": mgr,
+                    "Slot": pos,
+                    "Added (↑)": f"{u['player']} {u['pts']:.0f}",
+                    "Replaced (↓)": (f"{u['replaced']} {u['replaced_pts']:.0f}"
+                                     if u["replaced"] else "open slot"),
+                    "Upgrade": round(u["gain"], 1),
+                })
+    if ups:
+        lb = (pd.DataFrame(ups).sort_values("Upgrade", ascending=False)
+              .head(10).reset_index(drop=True))
+        lb.index = lb.index + 1
+        st.dataframe(
+            lb, use_container_width=True,
+            column_config={"Upgrade": st.column_config.NumberColumn("Upgrade", format="%.1f")},
+        )
+    else:
+        st.caption("No starting-lineup upgrades yet.")
+
+    # --- Per-manager slot tables ---
+    st.markdown("---")
+    st.caption("Expand a manager for their per-slot change (↑ added / ↓ bumped) and "
                "current veteran starters.")
     for mgr in summary.index:
         d = per_mgr[mgr]
@@ -125,7 +154,6 @@ def render_roster_impact(rookies, draft, league_id):
         head = (f"{mgr} — +{summary.loc[mgr, 'above_starters']:.0f} above starters · "
                 f"{summary.loc[mgr, 'total_added']:.0f} total")
         with st.expander(head):
-            # Drafted rookies and their raw projections
             if add_df.empty:
                 st.caption("No projected rookies drafted.")
             else:
@@ -133,18 +161,21 @@ def render_roster_impact(rookies, draft, league_id):
                 for _, p in add_df.sort_values(score_col, ascending=False).iterrows():
                     st.markdown(f"- {p['name']} ({p['position']}) · {p[score_col]:.0f} pts")
 
-            # Per-slot +/- vs the manager's current veteran starters
             st.markdown("**Lineup change by slot**")
+            slot_rows = []
             for pos in ("QB", "RB", "WR", "TE"):
                 ch = changes.get(pos, {})
-                delta = ch.get("delta", 0.0)
-                if ch.get("added_in"):
-                    ins = ", ".join(f"{n} {p:.0f}" for n, p in ch["added_in"])
-                    outs = (", ".join(f"{n} {p:.0f}" for n, p in ch["bumped_out"])
-                            or "open slot")
-                    st.markdown(f"- **{pos} {delta:+.0f}** — ↑ {ins} · ↓ {outs}")
-                else:
-                    st.markdown(f"- {pos} +0  ·  _no starter upgrade_")
-                vets = ", ".join(f"{n} {p:.0f}" for n, p
-                                 in ch.get("old_starters", [])) or "—"
-                st.caption(f"current {pos} starters: {vets}")
+                added = ", ".join(f"{n} {p:.0f}" for n, p in ch.get("added_in", [])) or "—"
+                bumped = ", ".join(f"{n} {p:.0f}" for n, p in ch.get("bumped_out", []))
+                if not bumped:
+                    bumped = "open slot" if ch.get("added_in") else "—"
+                starters = ", ".join(f"{n} {p:.0f}" for n, p
+                                     in ch.get("old_starters", [])) or "—"
+                slot_rows.append({
+                    "Slot": pos,
+                    "Δ": f"{ch.get('delta', 0.0):+.0f}",
+                    "Added ↑": added,
+                    "Bumped ↓": bumped,
+                    "Current starters": starters,
+                })
+            st.table(pd.DataFrame(slot_rows).set_index("Slot"))

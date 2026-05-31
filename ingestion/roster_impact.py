@@ -50,8 +50,11 @@ def lineup_changes(baseline: pd.DataFrame, added: pd.DataFrame,
         'new_starters': [(name, pts), ...],      # starters after adding
         'added_in':    [(name, pts), ...],       # entered the lineup (the '+')
         'bumped_out':  [(name, pts), ...],       # pushed out of the lineup (the '−')
-    }}. Identity is by id_col so same-named players don't collide. Both frames need
-    'position', score_col, id_col, and name_col columns."""
+        'upgrades':    [{'player','pts','replaced','replaced_pts','gain'}, ...],
+    }}. Each upgrade is one entrant credited (best first) against the weakest
+    starter it pushes out (replaced=None for an open slot); upgrade gains sum to
+    delta. Identity is by id_col so same-named players don't collide. Both frames
+    need 'position', score_col, id_col, and name_col columns."""
     counts = counts or STARTER_COUNTS
 
     def _pairs(df):
@@ -66,11 +69,22 @@ def lineup_changes(baseline: pd.DataFrame, added: pd.DataFrame,
         combined = pd.concat(frames, ignore_index=True) if frames else base_pos
         new = combined.sort_values(score_col, ascending=False).head(n)
         old_ids, new_ids = set(old[id_col]), set(new[id_col])
+        entrants = _pairs(new[~new[id_col].isin(old_ids)])   # new is score-desc
+        bumped = _pairs(old[~old[id_col].isin(new_ids)])     # old is score-desc
+        # Credit the best entrant against the weakest starter it pushes out, so an
+        # individual "upgrade" reflects the elite pickup (gains still sum to delta).
+        bumped_asc = sorted(bumped, key=lambda t: t[1])
+        upgrades = []
+        for i, (nm, pts) in enumerate(entrants):
+            rep_nm, rep_pts = bumped_asc[i] if i < len(bumped_asc) else (None, 0.0)
+            upgrades.append({"player": nm, "pts": pts, "replaced": rep_nm,
+                             "replaced_pts": rep_pts, "gain": pts - rep_pts})
         result[pos] = {
             "delta": float(new[score_col].sum() - old[score_col].sum()),
             "old_starters": _pairs(old),
             "new_starters": _pairs(new),
-            "added_in": _pairs(new[~new[id_col].isin(old_ids)]),
-            "bumped_out": _pairs(old[~old[id_col].isin(new_ids)]),
+            "added_in": entrants,
+            "bumped_out": bumped,
+            "upgrades": upgrades,
         }
     return result
