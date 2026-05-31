@@ -6,7 +6,7 @@ import streamlit as st
 
 from config import STARTER_COUNTS
 from ingestion.match_util import normalize_name
-from ingestion.roster_impact import points_above_starters
+from ingestion.roster_impact import points_above_starters, lineup_changes
 
 SCORE_OPTIONS = {"PPR": "pts_ppr", "Half PPR": "pts_half_ppr", "Standard": "pts_std"}
 
@@ -80,10 +80,10 @@ def render_roster_impact(rookies, draft, league_id):
     def _frame(ids):
         ids = [i for i in ids if i in proj_idx.index]
         if not ids:
-            return pd.DataFrame({"position": [], score_col: [], "name": []})
+            return pd.DataFrame({"player_id": [], "position": [], score_col: [], "name": []})
         return proj_idx.loc[ids, ["position", score_col, "name"]].reset_index()
 
-    rows, total_roster, matched_roster = [], 0, 0
+    rows, per_mgr, total_roster, matched_roster = [], {}, 0, 0
     for mgr, added_ids in drafted.items():
         added_ids = [str(i) for i in added_ids]
         base_ids = roster_ids.get(mgr, set()) - set(added_ids)   # never double-count
@@ -93,6 +93,10 @@ def render_roster_impact(rookies, draft, league_id):
         add_df = _frame(added_ids)
         total_added = float(add_df[score_col].sum()) if not add_df.empty else 0.0
         above = points_above_starters(base_df, add_df, STARTER_COUNTS, score_col)
+        per_mgr[mgr] = {
+            "add_df": add_df,
+            "changes": lineup_changes(base_df, add_df, STARTER_COUNTS, score_col),
+        }
         rows.append({"manager": mgr, "total_added": round(total_added, 1),
                      "above_starters": round(above, 1)})
     summary = pd.DataFrame(rows).set_index("manager").sort_values(
@@ -102,25 +106,45 @@ def render_roster_impact(rookies, draft, league_id):
         st.caption(f"Projection coverage: {matched_roster}/{total_roster} rostered "
                    f"players matched · scoring {score_label}")
 
+    # Horizontal bars, ranked high-to-low.
+    from views.charts import hbar
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Total projected pts added**")
-        st.bar_chart(summary["total_added"])
+        hbar(summary["total_added"], "pts", color="#377eb8")
     with c2:
         st.markdown("**Pts added above starters**")
-        st.bar_chart(summary["above_starters"])
+        hbar(summary["above_starters"], "pts", color="#4daf4a")
 
     st.markdown("---")
+    st.caption("Expand a manager for the per-slot change (↑ added / ↓ bumped) and their "
+               "current veteran starters.")
     for mgr in summary.index:
-        add_df = _frame([str(i) for i in drafted[mgr]])
-        if not add_df.empty:
-            add_df = add_df.sort_values(score_col, ascending=False)
+        d = per_mgr[mgr]
+        add_df, changes = d["add_df"], d["changes"]
         head = (f"{mgr} — +{summary.loc[mgr, 'above_starters']:.0f} above starters · "
                 f"{summary.loc[mgr, 'total_added']:.0f} total")
         with st.expander(head):
+            # Drafted rookies and their raw projections
             if add_df.empty:
                 st.caption("No projected rookies drafted.")
             else:
-                for _, p in add_df.iterrows():
-                    st.markdown(f"- **{p['name']}** {p['position']} · "
-                                f"{p[score_col]:.0f} pts")
+                st.markdown("**Drafted rookies**")
+                for _, p in add_df.sort_values(score_col, ascending=False).iterrows():
+                    st.markdown(f"- {p['name']} ({p['position']}) · {p[score_col]:.0f} pts")
+
+            # Per-slot +/- vs the manager's current veteran starters
+            st.markdown("**Lineup change by slot**")
+            for pos in ("QB", "RB", "WR", "TE"):
+                ch = changes.get(pos, {})
+                delta = ch.get("delta", 0.0)
+                if ch.get("added_in"):
+                    ins = ", ".join(f"{n} {p:.0f}" for n, p in ch["added_in"])
+                    outs = (", ".join(f"{n} {p:.0f}" for n, p in ch["bumped_out"])
+                            or "open slot")
+                    st.markdown(f"- **{pos} {delta:+.0f}** — ↑ {ins} · ↓ {outs}")
+                else:
+                    st.markdown(f"- {pos} +0  ·  _no starter upgrade_")
+                vets = ", ".join(f"{n} {p:.0f}" for n, p
+                                 in ch.get("old_starters", [])) or "—"
+                st.caption(f"current {pos} starters: {vets}")

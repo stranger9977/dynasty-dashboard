@@ -53,3 +53,51 @@ def test_above_starters_empty_added_is_zero():
     base = _df([("QB", 300), ("QB", 250)])
     add = pd.DataFrame(columns=["position", "pts"])
     assert points_above_starters(base, add, COUNTS, "pts") == pytest.approx(0)
+
+
+# --- lineup_changes: per-position +/- breakdown ---
+from ingestion.roster_impact import lineup_changes
+
+
+def _idf(rows):
+    # rows: (player_id, position, pts, name)
+    return pd.DataFrame(rows, columns=["player_id", "position", "pts", "name"])
+
+
+def test_lineup_changes_swap_in_and_out():
+    base = _idf([("v1", "QB", 300, "Vet A"), ("v2", "QB", 250, "Vet B")])
+    add = _idf([("r1", "QB", 280, "Rook")])
+    qb = lineup_changes(base, add, COUNTS, "pts")["QB"]
+    assert qb["delta"] == pytest.approx(30)
+    assert qb["added_in"] == [("Rook", 280.0)]
+    assert qb["bumped_out"] == [("Vet B", 250.0)]
+    assert ("Rook", 280.0) in qb["new_starters"]
+    assert qb["old_starters"] == [("Vet A", 300.0), ("Vet B", 250.0)]
+
+
+def test_lineup_changes_below_cutoff_no_swap():
+    base = _idf([("v1", "QB", 300, "A"), ("v2", "QB", 250, "B")])
+    add = _idf([("r1", "QB", 150, "R")])
+    qb = lineup_changes(base, add, COUNTS, "pts")["QB"]
+    assert qb["delta"] == pytest.approx(0)
+    assert qb["added_in"] == []
+    assert qb["bumped_out"] == []
+
+
+def test_lineup_changes_fills_open_slot():
+    # only 1 QB rostered but 2 start -> rookie fills the open slot, nobody bumped
+    base = _idf([("v1", "QB", 300, "A")])
+    add = _idf([("r1", "QB", 120, "R")])
+    qb = lineup_changes(base, add, COUNTS, "pts")["QB"]
+    assert qb["delta"] == pytest.approx(120)
+    assert qb["added_in"] == [("R", 120.0)]
+    assert qb["bumped_out"] == []
+
+
+def test_lineup_changes_deltas_sum_to_points_above_starters():
+    base = _idf([("v1", "RB", 100, "A"), ("v2", "RB", 90, "B"),
+                 ("v3", "RB", 80, "C"), ("w1", "WR", 50, "D")])
+    add = _idf([("r1", "RB", 110, "X"), ("r2", "WR", 60, "Y")])
+    res = lineup_changes(base, add, COUNTS, "pts")
+    total = sum(p["delta"] for p in res.values())
+    assert total == pytest.approx(points_above_starters(base, add, COUNTS, "pts"))

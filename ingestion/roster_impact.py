@@ -37,3 +37,40 @@ def points_above_starters(baseline: pd.DataFrame, added: pd.DataFrame,
     combined = pd.concat(frames, ignore_index=True)
     return (starter_points(combined, counts, score_col)
             - starter_points(baseline, counts, score_col))
+
+
+def lineup_changes(baseline: pd.DataFrame, added: pd.DataFrame,
+                   counts: dict | None = None, score_col: str = "pts",
+                   id_col: str = "player_id", name_col: str = "name") -> dict:
+    """Per-position breakdown of how `added` changes the starting lineup.
+
+    Returns {position: {
+        'delta': float,                          # points the lineup gained at this slot
+        'old_starters': [(name, pts), ...],      # current (pre-add) starters — veterans
+        'new_starters': [(name, pts), ...],      # starters after adding
+        'added_in':    [(name, pts), ...],       # entered the lineup (the '+')
+        'bumped_out':  [(name, pts), ...],       # pushed out of the lineup (the '−')
+    }}. Identity is by id_col so same-named players don't collide. Both frames need
+    'position', score_col, id_col, and name_col columns."""
+    counts = counts or STARTER_COUNTS
+
+    def _pairs(df):
+        return [(str(r[name_col]), float(r[score_col])) for _, r in df.iterrows()]
+
+    result = {}
+    for pos, n in counts.items():
+        base_pos = baseline[baseline["position"] == pos]
+        add_pos = added[added["position"] == pos]
+        old = base_pos.sort_values(score_col, ascending=False).head(n)
+        frames = [f for f in (base_pos, add_pos) if not f.empty]
+        combined = pd.concat(frames, ignore_index=True) if frames else base_pos
+        new = combined.sort_values(score_col, ascending=False).head(n)
+        old_ids, new_ids = set(old[id_col]), set(new[id_col])
+        result[pos] = {
+            "delta": float(new[score_col].sum() - old[score_col].sum()),
+            "old_starters": _pairs(old),
+            "new_starters": _pairs(new),
+            "added_in": _pairs(new[~new[id_col].isin(old_ids)]),
+            "bumped_out": _pairs(old[~old[id_col].isin(new_ids)]),
+        }
+    return result

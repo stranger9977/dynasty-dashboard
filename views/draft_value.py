@@ -158,14 +158,15 @@ def render_draft_value_recap(rookies, draft, league_id):
     pv = build_pick_values(picks_df, lam, max_rank=len(rookies))
     summary = summarize_managers(pv)
 
-    # --- Two charts side by side (stack on mobile) ---
+    # --- Two charts side by side (stack on mobile), bars ranked high-to-low ---
+    from views.charts import hbar
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Total value vs slot**")
-        st.bar_chart(summary["total_surplus"])
+        hbar(summary["total_surplus"], "surplus", color="#4daf4a")
     with c2:
         st.markdown("**Value per pick**")
-        st.bar_chart(summary["surplus_per_pick"])
+        hbar(summary["surplus_per_pick"], "surplus/pick", color="#377eb8")
 
     # --- Reach / Steal cards ---
     st.markdown("---")
