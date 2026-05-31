@@ -47,3 +47,15 @@ def test_parse_empty_input():
     df = _parse_projections([])
     assert list(df.columns) == OUT_COLS
     assert df.empty
+
+
+def test_parse_drops_duplicate_player_ids():
+    dup = [
+        {"player_id": "7", "player": {"first_name": "Dup", "last_name": "Guy",
+            "position": "WR", "team": "NE", "years_exp": 1}, "stats": {"pts_ppr": 100.0}},
+        {"player_id": "7", "player": {"first_name": "Dup", "last_name": "Guy",
+            "position": "WR", "team": "NE", "years_exp": 1}, "stats": {"pts_ppr": 100.0}},
+    ]
+    df = _parse_projections(dup)
+    assert len(df) == 1
+    assert df.set_index("player_id").index.is_unique

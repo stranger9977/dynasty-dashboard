@@ -35,6 +35,8 @@ def _parse_projections(raw: list) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=OUT_COLS)
     if df.empty:
         return df
+    # Guarantee one row per Sleeper id so downstream id-indexed lookups can't fan out.
+    df = df.drop_duplicates("player_id")
     return df.sort_values("pts_ppr", ascending=False).reset_index(drop=True)
 
 
