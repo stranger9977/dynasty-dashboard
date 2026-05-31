@@ -36,6 +36,10 @@ KTC_PLAYER_URL = "https://keeptradecut.com/dynasty-rankings/players"
 # Position groups
 POSITIONS = ["QB", "RB", "WR", "TE"]
 
+# Starting-lineup counts for "points above starters" (user-defined: SF approximated
+# by a 2nd QB). Used by the Roster Impact view.
+STARTER_COUNTS = {"QB": 2, "RB": 3, "WR": 4, "TE": 2}
+
 # Points analysis
 PPW_FALLBACK = 110.0  # Points per win fallback
 PPW_MIN, PPW_MAX = 50.0, 250.0  # Sanity bounds for PPW estimate
