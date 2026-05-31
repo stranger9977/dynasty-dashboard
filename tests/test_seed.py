@@ -22,3 +22,7 @@ def test_does_not_overwrite_existing(tmp_path, monkeypatch):
     monkeypatch.setattr(seed, "SEED_FILES", ["merged.parquet"])
     seed.ensure_data_from_seed()
     assert (data / "merged.parquet").read_bytes() == b"LIVE"  # unchanged
+
+def test_projections_in_seed_files():
+    from ingestion.seed import SEED_FILES
+    assert "projections.parquet" in SEED_FILES

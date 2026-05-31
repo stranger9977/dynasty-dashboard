@@ -77,6 +77,8 @@ def render_sidebar() -> str:
     _fresh(LATEROUND_CSV, "LateRound")
     _fresh(NFL_DRAFT_PARQUET, "NFL Draft")
     _fresh(ADP_CSV, "ADP")
+    from config import PROJECTIONS_PARQUET
+    _fresh(PROJECTIONS_PARQUET, "Projections")
 
     if st.sidebar.button("Refresh Data", use_container_width=True):
         _refresh_data()
@@ -111,6 +113,16 @@ def _refresh_data():
             st.write(f"NFL draft: {len(nd)} skill picks")
         except Exception as e:
             st.write(f"NFL draft fetch failed — keeping existing ({e})")
+
+        st.write("Fetching 2026 projections...")
+        try:
+            from ingestion.projections import fetch_projections
+            from config import PROJECTIONS_PARQUET
+            pr = fetch_projections()
+            pr.to_parquet(PROJECTIONS_PARQUET, index=False)
+            st.write(f"Projections: {len(pr)} skill players")
+        except Exception as e:
+            st.write(f"Projections fetch failed — keeping existing ({e})")
 
         st.write("Matching players...")
         merged = merge_rankings(fc, kt)

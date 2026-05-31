@@ -6,6 +6,7 @@ from config import DATA_DIR, SEED_DIR
 
 SEED_FILES = [
     "fantasycalc.parquet", "ktc.parquet", "merged.parquet", "nfl_draft.parquet",
+    "projections.parquet",
     "lateround_rankings.csv", "adp_rankings.csv",
 ]
 

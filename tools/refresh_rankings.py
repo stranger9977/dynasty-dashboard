@@ -39,6 +39,16 @@ def main() -> None:
     except Exception as e:
         print(f"  NFL draft fetch failed ({e}) — keeping existing file")
 
+    print("Fetching 2026 projections...")
+    from ingestion.projections import fetch_projections
+    from config import PROJECTIONS_PARQUET
+    try:
+        pr = fetch_projections()
+        pr.to_parquet(PROJECTIONS_PARQUET, index=False)
+        print(f"  Projections: {len(pr)} skill players")
+    except Exception as e:
+        print(f"  Projections fetch failed ({e}) — keeping existing file")
+
     print("Matching players...")
     merged = merge_rankings(fc, kt)
     merged.to_parquet(MERGED_PARQUET, index=False)
